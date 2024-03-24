@@ -1,0 +1,164 @@
+package hasher
+
+import (
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/hex"
+	"io"
+	"os"
+
+	"github.com/illikainen/go-utils/src/errorx"
+	"github.com/illikainen/go-utils/src/iofs"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/blake2b"
+)
+
+var ErrInvalidHash = errors.New("invalid hash")
+
+type Hasher struct {
+	SHA256      string
+	SHA512      string
+	BLAKE2b512  string
+	HashedBytes int
+}
+
+func New(path string) (h *Hasher, err error) {
+	sha256sum := sha256.New()
+	sha512sum := sha512.New()
+	blake2b512sum, err := blake2b.New512(nil)
+	if err != nil {
+		return nil, errors.Wrap(err, path)
+	}
+
+	f, err := os.Open(path) // #nosec G304
+	if err != nil {
+		return nil, errors.Wrap(err, path)
+	}
+	defer errorx.Defer(f.Close, &err)
+
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, errors.Wrap(err, path)
+	}
+	size := stat.Size()
+
+	actualSize := 0
+	for {
+		buf := [4096]byte{}
+		rn, err := f.Read(buf[:])
+		if rn == 0 && err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, errors.Wrap(err, path)
+		}
+		if rn <= 0 {
+			return nil, errors.Errorf("bug")
+		}
+
+		wn, err := sha256sum.Write(buf[:rn])
+		if err != nil || wn != rn {
+			return nil, errors.Errorf("bug")
+		}
+
+		wn, err = sha512sum.Write(buf[:rn])
+		if err != nil || wn != rn {
+			return nil, errors.Errorf("bug")
+		}
+
+		wn, err = blake2b512sum.Write(buf[:rn])
+		if err != nil || wn != rn {
+			return nil, errors.Errorf("bug")
+		}
+
+		actualSize += rn
+	}
+
+	if int64(actualSize) != size {
+		return nil, errors.Wrap(iofs.ErrInvalidSize, path)
+	}
+
+	return &Hasher{
+		SHA256:      hex.EncodeToString(sha256sum.Sum(nil)),
+		SHA512:      hex.EncodeToString(sha512sum.Sum(nil)),
+		BLAKE2b512:  hex.EncodeToString(blake2b512sum.Sum(nil)),
+		HashedBytes: actualSize,
+	}, nil
+}
+
+func (h *Hasher) Verify(path string) (err error) {
+	log.Debugf("%s: verifying checksums", path)
+
+	sha256sum := sha256.New()
+	sha512sum := sha512.New()
+	blake2b512sum, err := blake2b.New512(nil)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(path) // #nosec G304
+	if err != nil {
+		return err
+	}
+	defer errorx.Defer(f.Close, &err)
+
+	stat, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	size := stat.Size()
+
+	actualSize := 0
+	for {
+		buf := [4096]byte{}
+		rn, err := f.Read(buf[:])
+		if rn == 0 && err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if rn <= 0 {
+			return errors.Errorf("bug")
+		}
+
+		wn, err := sha256sum.Write(buf[:rn])
+		if err != nil || wn != rn {
+			return errors.Errorf("bug")
+		}
+
+		wn, err = sha512sum.Write(buf[:rn])
+		if err != nil || wn != rn {
+			return errors.Errorf("bug")
+		}
+
+		wn, err = blake2b512sum.Write(buf[:rn])
+		if err != nil || wn != rn {
+			return errors.Errorf("bug")
+		}
+
+		actualSize += rn
+	}
+
+	if int64(actualSize) != size || actualSize != h.HashedBytes {
+		return errors.Wrap(iofs.ErrInvalidSize, path)
+	}
+
+	if hex.EncodeToString(sha256sum.Sum(nil)) != h.SHA256 {
+		return errors.Wrapf(ErrInvalidHash, "%s: sha256", f.Name())
+	}
+	log.Infof("sha256: verified: %s", h.SHA256)
+
+	if hex.EncodeToString(sha512sum.Sum(nil)) != h.SHA512 {
+		return errors.Wrapf(ErrInvalidHash, "%s: sha512", f.Name())
+	}
+	log.Infof("sha512: verified: %s", h.SHA512)
+
+	if hex.EncodeToString(blake2b512sum.Sum(nil)) != h.BLAKE2b512 {
+		return errors.Wrapf(ErrInvalidHash, "%s: blake2b512", f.Name())
+	}
+	log.Infof("blake2b512: verified: %s", h.BLAKE2b512)
+
+	return nil
+}
