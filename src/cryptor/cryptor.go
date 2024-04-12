@@ -13,6 +13,7 @@ import (
 type PublicKey interface {
 	Verify([]byte, []byte) error
 	Encrypt([]byte) (string, error)
+	Export() ([]byte, error)
 	Write(string) error
 	Fingerprint() string
 	Type() string
@@ -22,6 +23,7 @@ type PublicKey interface {
 type PrivateKey interface {
 	Sign([]byte) ([]byte, error)
 	Decrypt(string) ([]byte, error)
+	Export() ([]byte, error)
 	Write(string) error
 	Fingerprint() string
 	Type() string
@@ -108,28 +110,6 @@ type GenerateKeyConfig struct {
 func GenerateKeyFlags(config GenerateKeyConfig) *pflag.FlagSet {
 	flags := pflag.NewFlagSet("genkey", pflag.ContinueOnError)
 	flags.SortFlags = config.Sort
-
-	flag.StringToVarP(
-		flags,
-		&config.Options.KeyType,
-		config.Prefix+"type",
-		lo.Ternary(config.Prefix == "", "t", ""),
-		flag.StringToInt[int]{
-			Choices: AsymmetricMap,
-		},
-		"Key type",
-	)
-
-	flag.StringToVarP(
-		flags,
-		&config.Options.Purpose,
-		config.Prefix+"purpose",
-		lo.Ternary(config.Prefix == "", "p", ""),
-		flag.StringToInt[int]{
-			Choices: PurposeMap,
-		},
-		"Key purpose",
-	)
 
 	flag.PathVarP(
 		flags,

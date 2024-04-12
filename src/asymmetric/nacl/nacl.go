@@ -17,6 +17,17 @@ func GenerateKey(purpose int) (cryptor.PublicKey, cryptor.PrivateKey, error) {
 	return nil, nil, cryptor.ErrInvalidPurpose
 }
 
+func LoadPublicKey(data []byte, purpose int) (cryptor.PublicKey, []byte, error) {
+	switch purpose {
+	case cryptor.SignPurpose:
+		return naclsig.LoadPublicKey(data, purpose)
+	case cryptor.EncryptPurpose:
+		return naclenc.LoadPublicKey(data, purpose)
+	}
+
+	return nil, nil, cryptor.ErrInvalidPurpose
+}
+
 func ReadPublicKey(path string, purpose int) (cryptor.PublicKey, error) {
 	switch purpose {
 	case cryptor.SignPurpose:
@@ -26,6 +37,17 @@ func ReadPublicKey(path string, purpose int) (cryptor.PublicKey, error) {
 	}
 
 	return nil, cryptor.ErrInvalidPurpose
+}
+
+func LoadPrivateKey(data []byte, purpose int) (cryptor.PrivateKey, []byte, error) {
+	switch purpose {
+	case cryptor.SignPurpose:
+		return naclsig.LoadPrivateKey(data, purpose)
+	case cryptor.EncryptPurpose:
+		return naclenc.LoadPrivateKey(data, purpose)
+	}
+
+	return nil, nil, cryptor.ErrInvalidPurpose
 }
 
 func ReadPrivateKey(path string, purpose int) (cryptor.PrivateKey, error) {

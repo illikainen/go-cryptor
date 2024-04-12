@@ -1,6 +1,7 @@
 package rsa
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -14,7 +15,6 @@ import (
 	"github.com/illikainen/go-cryptor/src/cryptor"
 	"github.com/illikainen/go-cryptor/src/metadata"
 
-	"github.com/illikainen/go-utils/src/errorx"
 	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -79,6 +79,33 @@ func GenerateKey(purpose int) (cryptor.PublicKey, cryptor.PrivateKey, error) {
 	return pubKey, privKey, nil
 }
 
+func LoadPublicKey(data []byte, purpose int) (cryptor.PublicKey, []byte, error) {
+	block, rest := pem.Decode(data)
+	if block == nil {
+		return nil, nil, errors.Errorf("PEM decoding error")
+	}
+
+	if block.Type != publicKeyType[purpose] {
+		return nil, nil, cryptor.ErrInvalidKeyType
+	}
+
+	pubRSA, err := x509.ParsePKCS1PublicKey(block.Bytes)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	fingerprint, err := fingerprintPublicKey(pubRSA)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &PublicKey{
+		key:         *pubRSA,
+		fingerprint: fingerprint,
+		purpose:     purpose,
+	}, rest, nil
+}
+
 func ReadPublicKey(path string, purpose int) (cryptor.PublicKey, error) {
 	_, ok := publicKeyType[purpose]
 	if !ok {
@@ -90,28 +117,12 @@ func ReadPublicKey(path string, purpose int) (cryptor.PublicKey, error) {
 		return nil, err
 	}
 
-	block, err := cryptor.DecodePEM(buf)
+	pubKey, rest, err := LoadPublicKey(buf, purpose)
 	if err != nil {
 		return nil, err
 	}
-	if block.Type != publicKeyType[purpose] {
-		return nil, cryptor.ErrInvalidKeyType
-	}
-
-	pubRSA, err := x509.ParsePKCS1PublicKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-
-	fingerprint, err := fingerprintPublicKey(pubRSA)
-	if err != nil {
-		return nil, err
-	}
-
-	pubKey := &PublicKey{
-		key:         *pubRSA,
-		fingerprint: fingerprint,
-		purpose:     purpose,
+	if len(rest) != 0 {
+		return nil, iofs.ErrInvalidSize
 	}
 
 	log.Debugf("%s: read %s", path, pubKey)
@@ -127,6 +138,38 @@ func fingerprintPublicKey(pubKey *rsa.PublicKey) (string, error) {
 	return ssh.FingerprintSHA256(sshPubKey), nil
 }
 
+func LoadPrivateKey(data []byte, purpose int) (cryptor.PrivateKey, []byte, error) {
+	block, rest := pem.Decode(data)
+	if block == nil {
+		return nil, nil, errors.Errorf("PEM decoding error")
+	}
+
+	if block.Type != privateKeyType[purpose] {
+		return nil, nil, cryptor.ErrInvalidKeyType
+	}
+
+	privRSA, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	err = privRSA.Validate()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	fingerprint, err := fingerprintPrivateKey(privRSA)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &PrivateKey{
+		key:         privRSA,
+		fingerprint: fingerprint,
+		purpose:     purpose,
+	}, rest, nil
+}
+
 func ReadPrivateKey(path string, purpose int) (cryptor.PrivateKey, error) {
 	_, ok := privateKeyType[purpose]
 	if !ok {
@@ -138,33 +181,12 @@ func ReadPrivateKey(path string, purpose int) (cryptor.PrivateKey, error) {
 		return nil, err
 	}
 
-	block, err := cryptor.DecodePEM(buf)
+	privKey, rest, err := LoadPrivateKey(buf, purpose)
 	if err != nil {
 		return nil, err
 	}
-	if block.Type != privateKeyType[purpose] {
-		return nil, cryptor.ErrInvalidKeyType
-	}
-
-	privRSA, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-
-	err = privRSA.Validate()
-	if err != nil {
-		return nil, err
-	}
-
-	fingerprint, err := fingerprintPrivateKey(privRSA)
-	if err != nil {
-		return nil, err
-	}
-
-	privKey := &PrivateKey{
-		key:         privRSA,
-		fingerprint: fingerprint,
-		purpose:     purpose,
+	if len(rest) != 0 {
+		return nil, iofs.ErrInvalidSize
 	}
 
 	log.Debugf("%s: read %s", path, privKey)
@@ -210,7 +232,20 @@ func (k *PublicKey) Encrypt(plaintext []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-func (k *PublicKey) Write(path string) (err error) {
+func (k *PublicKey) Export() ([]byte, error) {
+	buf := bytes.Buffer{}
+	err := pem.Encode(&buf, &pem.Block{
+		Type:  publicKeyType[k.purpose],
+		Bytes: x509.MarshalPKCS1PublicKey(&k.key),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (k *PublicKey) Write(path string) error {
 	exists, err := iofs.Exists(path)
 	if err != nil {
 		return err
@@ -221,16 +256,12 @@ func (k *PublicKey) Write(path string) (err error) {
 
 	log.Infof("%s: writing public key for %s", path, k)
 
-	f, err := os.Create(path) // #nosec G304
+	export, err := k.Export()
 	if err != nil {
 		return err
 	}
-	defer errorx.Defer(f.Close, &err)
 
-	err = pem.Encode(f, &pem.Block{
-		Type:  publicKeyType[k.purpose],
-		Bytes: x509.MarshalPKCS1PublicKey(&k.key),
-	})
+	err = os.WriteFile(path, export, 0600)
 	if err != nil {
 		return err
 	}
@@ -287,7 +318,20 @@ func (k *PrivateKey) Decrypt(ciphertext string) ([]byte, error) {
 	return rsa.DecryptOAEP(sha256.New(), rand.Reader, k.key, cipherbytes, nil)
 }
 
-func (k *PrivateKey) Write(path string) (err error) {
+func (k *PrivateKey) Export() ([]byte, error) {
+	buf := bytes.Buffer{}
+	err := pem.Encode(&buf, &pem.Block{
+		Type:  privateKeyType[k.purpose],
+		Bytes: x509.MarshalPKCS1PrivateKey(k.key),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (k *PrivateKey) Write(path string) error {
 	exists, err := iofs.Exists(path)
 	if err != nil {
 		return err
@@ -298,16 +342,12 @@ func (k *PrivateKey) Write(path string) (err error) {
 
 	log.Infof("%s: writing private key for %s", path, k)
 
-	f, err := os.Create(path) // #nosec G304
+	export, err := k.Export()
 	if err != nil {
 		return err
 	}
-	defer errorx.Defer(f.Close, &err)
 
-	err = pem.Encode(f, &pem.Block{
-		Type:  privateKeyType[k.purpose],
-		Bytes: x509.MarshalPKCS1PrivateKey(k.key),
-	})
+	err = os.WriteFile(path, export, 0600)
 	if err != nil {
 		return err
 	}

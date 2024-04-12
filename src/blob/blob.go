@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/illikainen/go-cryptor/src/asymmetric"
 	"github.com/illikainen/go-cryptor/src/asymmetric/naclsig"
 	"github.com/illikainen/go-cryptor/src/asymmetric/rsa"
 	"github.com/illikainen/go-cryptor/src/cryptor"
@@ -34,19 +35,9 @@ type Blob struct {
 	symmetricKeys map[string]string
 }
 
-type Keys struct {
-	Public  []cryptor.PublicKey
-	Private []cryptor.PrivateKey
-}
-
-type Keyring struct {
-	NaCl Keys
-	RSA  Keys
-}
-
 type Keyrings struct {
-	Sign    *Keyring
-	Encrypt *Keyring
+	Public  []cryptor.PublicKey
+	Private cryptor.PrivateKey
 }
 
 var ErrInvalidKeyUsage = errors.New("key usage overlap")
@@ -87,21 +78,15 @@ func (b *Blob) Download(remote string) (err error) {
 		return err
 	}
 
-	naclSig := make([]byte, naclsig.SignatureSize)
-	err = iofs.ReadFull(remotef, naclSig)
-	if err != nil {
-		return err
-	}
-
-	rsaSig := make([]byte, rsa.SignatureSize)
-	err = iofs.ReadFull(remotef, rsaSig)
+	signature := make([]byte, asymmetric.SignatureSize)
+	err = iofs.ReadFull(remotef, signature)
 	if err != nil {
 		return err
 	}
 
 	meta := &metadata.Metadata{}
 	err = logging.WithSuppress(func() error {
-		meta, err = b.VerifyMetadata(metaData, naclSig, rsaSig)
+		meta, err = b.VerifyMetadata(metaData, signature)
 		return err
 	})
 	if err != nil {
@@ -149,12 +134,7 @@ func (b *Blob) Download(remote string) (err error) {
 		return err
 	}
 
-	_, err = localf.Write(naclSig)
-	if err != nil {
-		return err
-	}
-
-	_, err = localf.Write(rsaSig)
+	_, err = localf.Write(signature)
 	if err != nil {
 		return err
 	}
@@ -208,10 +188,6 @@ func (b *Blob) Upload(remote string) error {
 }
 
 func (b *Blob) Sign() (err error) {
-	if len(b.Keys.Sign.NaCl.Private) == 0 && len(b.Keys.Sign.RSA.Private) == 0 {
-		return cryptor.ErrMissingPrivateKey
-	}
-
 	log.Debugf("signing %s", b.Path)
 
 	tmpDir, tmpClean, err := iofs.MkdirTemp()
@@ -241,42 +217,20 @@ func (b *Blob) Sign() (err error) {
 		return err
 	}
 
-	naclSig := make([]byte, naclsig.SignatureSize)
-	if len(b.Keys.Sign.NaCl.Private) > 0 {
-		naclSig, err = b.Keys.Sign.NaCl.Private[0].Sign(metaData)
-		if err != nil {
-			return err
-		}
-
-		log.Tracef("metadata: %s: signed json\n%s",
-			b.Keys.Sign.NaCl.Private[0].Type(),
-			strings.TrimRight(string(metaData), "\x00"),
-		)
-		log.Infof("metadata: %s: signed with %s",
-			b.Keys.Sign.NaCl.Private[0].Type(),
-			b.Keys.Sign.NaCl.Private[0].Fingerprint())
+	signature, err := b.Keys.Private.Sign(metaData)
+	if err != nil {
+		return err
 	}
 
-	rsaSig := make([]byte, rsa.SignatureSize)
-	if len(b.Keys.Sign.RSA.Private) > 0 {
-		rsaSig, err = b.Keys.Sign.RSA.Private[0].Sign(metaData)
-		if err != nil {
-			return err
-		}
-
-		log.Tracef("metadata: %s: signed json\n%s",
-			b.Keys.Sign.RSA.Private[0].Type(),
-			strings.TrimRight(string(metaData), "\x00"),
-		)
-		log.Infof("metadata: %s: signed with %s",
-			b.Keys.Sign.RSA.Private[0].Type(),
-			b.Keys.Sign.RSA.Private[0].Fingerprint())
-	}
+	log.Tracef("metadata: %s: signed json\n%s",
+		b.Keys.Private,
+		strings.TrimRight(string(metaData), "\x00"),
+	)
+	log.Infof("metadata: %s: signed json", b.Keys.Private)
 
 	header := []byte{}
 	header = append(header, metaData...)
-	header = append(header, naclSig...)
-	header = append(header, rsaSig...)
+	header = append(header, signature...)
 
 	err = b.Import(tmpBlob, header)
 	if err != nil {
@@ -286,41 +240,11 @@ func (b *Blob) Sign() (err error) {
 	return nil
 }
 
-func (b *Blob) VerifyMetadata(metaData []byte, naclSig []byte, rsaSig []byte) (*metadata.Metadata, error) {
-	if len(b.Keys.Sign.NaCl.Public) == 0 && len(b.Keys.Sign.RSA.Public) == 0 {
-		return nil, cryptor.ErrMissingPublicKey
-	}
-
-	if len(b.Keys.Sign.NaCl.Public) > 0 {
-		pubKey, err := b.verifyMetadata(metaData, naclSig, b.Keys.Sign.NaCl.Public)
-		if err != nil {
-			return nil, err
-		}
-		log.Infof("metadata: %s: verified: %s", pubKey.Type(), pubKey.Fingerprint())
-	}
-
-	if len(b.Keys.Sign.RSA.Public) > 0 {
-		pubKey, err := b.verifyMetadata(metaData, rsaSig, b.Keys.Sign.RSA.Public)
-		if err != nil {
-			return nil, err
-		}
-		log.Infof("metadata: %s: verified: %s", pubKey.Type(), pubKey.Fingerprint())
-	}
-
-	meta, err := metadata.Read(metaData)
-	if err != nil {
-		return nil, err
-	}
-
-	return meta, nil
-}
-
-func (b *Blob) verifyMetadata(metaData []byte, signature []byte,
-	pubKeys []cryptor.PublicKey) (cryptor.PublicKey, error) {
-	for _, pubKey := range pubKeys {
+func (b *Blob) VerifyMetadata(metaData []byte, signature []byte) (*metadata.Metadata, error) {
+	for _, pubKey := range b.Keys.Public {
 		err := pubKey.Verify(metaData, signature)
 		if err == nil {
-			return pubKey, nil
+			return metadata.Read(metaData)
 		}
 	}
 
@@ -342,19 +266,13 @@ func (b *Blob) Verify(out string) (meta *metadata.Metadata, err error) {
 		return nil, err
 	}
 
-	naclSig := make([]byte, naclsig.SignatureSize)
-	err = iofs.ReadFull(f, naclSig)
+	signature := make([]byte, asymmetric.SignatureSize)
+	err = iofs.ReadFull(f, signature)
 	if err != nil {
 		return nil, err
 	}
 
-	rsaSig := make([]byte, rsa.SignatureSize)
-	err = iofs.ReadFull(f, rsaSig)
-	if err != nil {
-		return nil, err
-	}
-
-	meta, err = b.VerifyMetadata(metaData, naclSig, rsaSig)
+	meta, err = b.VerifyMetadata(metaData, signature)
 	if err != nil {
 		return nil, err
 	}
@@ -387,10 +305,6 @@ func (b *Blob) Verify(out string) (meta *metadata.Metadata, err error) {
 }
 
 func (b *Blob) Encrypt() (err error) {
-	if len(b.Keys.Encrypt.RSA.Public) <= 0 && len(b.Keys.Encrypt.NaCl.Public) <= 0 {
-		return cryptor.ErrMissingPublicKey
-	}
-
 	tmpDir, tmpClean, err := iofs.MkdirTemp()
 	if err != nil {
 		return err
@@ -403,69 +317,61 @@ func (b *Blob) Encrypt() (err error) {
 		return err
 	}
 
-	if len(b.Keys.Encrypt.RSA.Public) > 0 {
-		symKey, err := symmetric.GenerateKey(cryptor.AESGCMSymmetric)
-		if err != nil {
-			return err
-		}
-
-		file := tmpBlob + ".aesgcm"
-		err = symKey.Encrypt(tmpBlob, file)
-		if err != nil {
-			return err
-		}
-		tmpBlob = file
-
-		symKeyData, err := symKey.Marshal()
-		if err != nil {
-			return err
-		}
-
-		for _, pubKey := range b.Keys.Encrypt.RSA.Public {
-			ciphertext, err := pubKey.Encrypt(symKeyData)
-			if err != nil {
-				return err
-			}
-
-			b.symmetricKeys[pubKey.String()] = ciphertext
-		}
+	aesKey, err := symmetric.GenerateKey(cryptor.AESGCMSymmetric)
+	if err != nil {
+		return err
 	}
 
-	if len(b.Keys.Encrypt.NaCl.Public) > 0 {
-		symKey, err := symmetric.GenerateKey(cryptor.XCHACHA20POLY1305Symmetric)
-		if err != nil {
-			return err
-		}
-
-		file := tmpBlob + ".xchacha20poly1305"
-		err = symKey.Encrypt(tmpBlob, file)
-		if err != nil {
-			return err
-		}
-		tmpBlob = file
-
-		symKeyData, err := symKey.Marshal()
-		if err != nil {
-			return err
-		}
-
-		for _, pubKey := range b.Keys.Encrypt.NaCl.Public {
-			ciphertext, err := pubKey.Encrypt(symKeyData)
-			if err != nil {
-				return err
-			}
-
-			b.symmetricKeys[pubKey.String()] = ciphertext
-		}
+	tmpBlobAes := tmpBlob + ".aesgcm"
+	err = aesKey.Encrypt(tmpBlob, tmpBlobAes)
+	if err != nil {
+		return err
 	}
 
-	return b.Import(tmpBlob, nil)
+	aesKeyData, err := aesKey.Marshal()
+	if err != nil {
+		return err
+	}
+
+	for _, pubKey := range b.Keys.Public {
+		ciphertext, err := pubKey.Encrypt(aesKeyData)
+		if err != nil {
+			return err
+		}
+
+		b.symmetricKeys[pubKey.String()+":AESGCM"] = ciphertext
+	}
+
+	xcpKey, err := symmetric.GenerateKey(cryptor.XCHACHA20POLY1305Symmetric)
+	if err != nil {
+		return err
+	}
+
+	tmpBlobXCP := tmpBlobAes + ".xchacha20poly1305"
+	err = xcpKey.Encrypt(tmpBlobAes, tmpBlobXCP)
+	if err != nil {
+		return err
+	}
+
+	xcpKeyData, err := xcpKey.Marshal()
+	if err != nil {
+		return err
+	}
+
+	for _, pubKey := range b.Keys.Public {
+		ciphertext, err := pubKey.Encrypt(xcpKeyData)
+		if err != nil {
+			return err
+		}
+
+		b.symmetricKeys[pubKey.String()+":XChaCha20Poly1305"] = ciphertext
+	}
+
+	return b.Import(tmpBlobXCP, nil)
 }
 
 func (b *Blob) Decrypt(in string, out string, keys map[string]string) (err error) {
-	if len(b.Keys.Encrypt.RSA.Private) <= 0 && len(b.Keys.Encrypt.NaCl.Private) <= 0 {
-		return cryptor.ErrMissingPrivateKey
-	}
+	log.Tracef("%s: decrypt to %s", in, out)
 
 	tmpBlob := in
 	tmpDir, tmpClean, err := iofs.MkdirTemp()
@@ -474,55 +380,49 @@ func (b *Blob) Decrypt(in string, out string, keys map[string]string) (err error
 	}
 	defer errorx.Defer(tmpClean, &err)
 
-	if len(b.Keys.Encrypt.NaCl.Private) > 0 {
-		for _, privKey := range b.Keys.Encrypt.NaCl.Private {
-			ciphertext, ok := keys[privKey.String()]
-			if ok {
-				symKey, err := privKey.Decrypt(ciphertext)
-				if err != nil {
-					return err
-				}
-
-				sym, err := symmetric.ReadKey(cryptor.XCHACHA20POLY1305Symmetric, symKey)
-				if err != nil {
-					return err
-				}
-
-				file := filepath.Join(tmpDir, "xchacha20poly1305.dec")
-				err = sym.Decrypt(tmpBlob, file)
-				if err != nil {
-					return err
-				}
-				tmpBlob = file
-			}
-		}
+	xcpCiphertext, ok := keys[b.Keys.Private.String()+":XChaCha20Poly1305"]
+	if !ok {
+		return errors.Errorf("missing XChaCha20Poly1305 key")
 	}
 
-	if len(b.Keys.Encrypt.RSA.Private) > 0 {
-		for _, privKey := range b.Keys.Encrypt.RSA.Private {
-			ciphertext, ok := keys[privKey.String()]
-			if ok {
-				plaintext, err := privKey.Decrypt(ciphertext)
-				if err != nil {
-					return err
-				}
-
-				symKey, err := symmetric.ReadKey(cryptor.AESGCMSymmetric, plaintext)
-				if err != nil {
-					return err
-				}
-
-				file := filepath.Join(tmpDir, "aesgcm.dec")
-				err = symKey.Decrypt(tmpBlob, file)
-				if err != nil {
-					return err
-				}
-				tmpBlob = file
-			}
-		}
+	xcpPlaintext, err := b.Keys.Private.Decrypt(xcpCiphertext)
+	if err != nil {
+		return err
 	}
 
-	return iofs.MoveFile(tmpBlob, out)
+	xcpKey, err := symmetric.ReadKey(cryptor.XCHACHA20POLY1305Symmetric, xcpPlaintext)
+	if err != nil {
+		return err
+	}
+
+	partial := filepath.Join(tmpDir, "xchacha20poly1305.dec")
+	err = xcpKey.Decrypt(tmpBlob, partial)
+	if err != nil {
+		return err
+	}
+
+	aesCiphertext, ok := keys[b.Keys.Private.String()+":AESGCM"]
+	if !ok {
+		return errors.Errorf("missing AES-GCM key")
+	}
+
+	aesPlaintext, err := b.Keys.Private.Decrypt(aesCiphertext)
+	if err != nil {
+		return err
+	}
+
+	aesKey, err := symmetric.ReadKey(cryptor.AESGCMSymmetric, aesPlaintext)
+	if err != nil {
+		return err
+	}
+
+	plaintext := filepath.Join(tmpDir, "aesgcm.dec")
+	err = aesKey.Decrypt(partial, plaintext)
+	if err != nil {
+		return err
+	}
+
+	return iofs.MoveFile(plaintext, out)
 }
 
 func (b *Blob) Export(out string) (err error) {
