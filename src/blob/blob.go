@@ -26,7 +26,7 @@ import (
 type Config struct {
 	Path      string
 	Transport transport.Transport
-	Keys      *Keyrings
+	Keys      *Keyring
 }
 
 type Blob struct {
@@ -35,7 +35,7 @@ type Blob struct {
 	symmetricKeys map[string]string
 }
 
-type Keyrings struct {
+type Keyring struct {
 	Public  []cryptor.PublicKey
 	Private cryptor.PrivateKey
 }
