@@ -69,7 +69,7 @@ func LoadPublicKey(data []byte, _ int) (cryptor.PublicKey, []byte, error) {
 		return nil, nil, errors.Errorf("PEM decoding error")
 	}
 
-	if block.Type != publicKeyType {
+	if block.Type != publicKeyType || len(block.Bytes) != 32 {
 		return nil, nil, cryptor.ErrInvalidKeyType
 	}
 
@@ -124,7 +124,7 @@ func LoadPrivateKey(data []byte, _ int) (cryptor.PrivateKey, []byte, error) {
 	if block == nil {
 		return nil, nil, errors.Errorf("PEM decoding error")
 	}
-	if block.Type != privateKeyType {
+	if block.Type != privateKeyType || len(block.Bytes) != 64 {
 		return nil, nil, cryptor.ErrInvalidKeyType
 	}
 
