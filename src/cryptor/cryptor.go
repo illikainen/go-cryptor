@@ -3,6 +3,7 @@ package cryptor
 import (
 	"bytes"
 	"encoding/pem"
+	"time"
 
 	"github.com/illikainen/go-utils/src/flag"
 	"github.com/pkg/errors"
@@ -99,6 +100,7 @@ type GenerateKeyOptions struct {
 	KeyType flag.Enum[int]
 	Purpose flag.Enum[int]
 	Output  string
+	Delay   time.Duration
 }
 
 type GenerateKeyConfig struct {
@@ -121,6 +123,14 @@ func GenerateKeyFlags(config GenerateKeyConfig) *pflag.FlagSet {
 			Suffixes: []string{"pub", "priv"},
 		},
 		"Write the generated keypair to <output>.pub and <output>.priv",
+	)
+
+	flags.DurationVarP(
+		&config.Options.Delay,
+		config.Prefix+"delay",
+		lo.Ternary(config.Prefix == "", "d", ""),
+		0,
+		"Add a delay between each generated key",
 	)
 
 	return flags

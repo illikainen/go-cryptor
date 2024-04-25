@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/illikainen/go-cryptor/src/asymmetric/nacl"
 	"github.com/illikainen/go-cryptor/src/asymmetric/naclsig"
@@ -34,32 +35,37 @@ type PrivateKeyContainer struct {
 	rsaEnc   cryptor.PrivateKey
 }
 
-func GenerateKey() (cryptor.PublicKey, cryptor.PrivateKey, error) {
-	log.Trace("generate keys")
-
+func GenerateKey(delay time.Duration) (cryptor.PublicKey, cryptor.PrivateKey, error) {
+	log.Debugf("generating NaCl signing key...")
 	naclSignPub, naclSignPriv, err := nacl.GenerateKey(cryptor.SignPurpose)
 	if err != nil {
 		return nil, nil, err
 	}
-	log.Tracef("NaCl signature fingerprint: %s", naclSignPub.Fingerprint())
+	log.Debugf("NaCl signature fingerprint: %s", naclSignPub.Fingerprint())
+	time.Sleep(delay)
 
+	log.Debugf("generating NaCl encryption key...")
 	naclEncPub, naclEncPriv, err := nacl.GenerateKey(cryptor.EncryptPurpose)
 	if err != nil {
 		return nil, nil, err
 	}
-	log.Tracef("NaCl encryption fingerprint: %s", naclEncPub.Fingerprint())
+	log.Debugf("NaCl encryption fingerprint: %s", naclEncPub.Fingerprint())
+	time.Sleep(delay)
 
+	log.Debugf("generating RSA signing key...")
 	rsaSignPub, rsaSignPriv, err := rsa.GenerateKey(cryptor.SignPurpose)
 	if err != nil {
 		return nil, nil, err
 	}
-	log.Tracef("RSA signature fingerprint: %s", rsaSignPub.Fingerprint())
+	log.Debugf("RSA signature fingerprint: %s", rsaSignPub.Fingerprint())
+	time.Sleep(delay)
 
+	log.Debugf("generating RSA encryption key...")
 	rsaEncPub, rsaEncPriv, err := rsa.GenerateKey(cryptor.EncryptPurpose)
 	if err != nil {
 		return nil, nil, err
 	}
-	log.Tracef("RSA signature fingerprint: %s", rsaEncPub.Fingerprint())
+	log.Debugf("RSA encryption fingerprint: %s", rsaEncPub.Fingerprint())
 
 	pub := &PublicKeyContainer{
 		naclSign: naclSignPub,
