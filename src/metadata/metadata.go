@@ -12,7 +12,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type Config struct {
+	Type      string
+	Hashes    *hasher.Hasher
+	Encrypted bool
+	Keys      map[string]string
+}
+
 type Metadata struct {
+	Type      string
 	Version   uint32
 	Timestamp int64
 	Encrypted bool
@@ -23,22 +31,27 @@ type Metadata struct {
 const MetadataSize = 1024 * 8
 const Version = 0
 
-func New(hashes *hasher.Hasher, encrypted bool, keys map[string]string) (*Metadata, error) {
+func New(config Config) (*Metadata, error) {
 	return &Metadata{
+		Type:      config.Type,
+		Hashes:    config.Hashes,
+		Encrypted: config.Encrypted,
+		Keys:      config.Keys,
 		Version:   Version,
 		Timestamp: time.Now().Unix(),
-		Encrypted: encrypted,
-		Keys:      keys,
-		Hashes:    hashes,
 	}, nil
 }
 
-func Read(data []byte) (*Metadata, error) {
+func Read(data []byte, typ string) (*Metadata, error) {
 	md := &Metadata{}
 
 	err := json.Unmarshal(bytes.TrimRight(data, "\x00"), md)
 	if err != nil {
 		return nil, err
+	}
+
+	if md.Type != typ {
+		return nil, errors.Errorf("incompatible type (%s vs %s)", md.Type, typ)
 	}
 
 	if md.Version != Version {
@@ -72,7 +85,7 @@ func (m *Metadata) Marshal() ([]byte, error) {
 }
 
 func (m *Metadata) Compare(other *Metadata) int64 {
-	if m.Hashes != other.Hashes {
+	if m.Type != other.Type || m.Hashes != other.Hashes {
 		log.Debug("skipping metadata comparison")
 		return 1
 	}

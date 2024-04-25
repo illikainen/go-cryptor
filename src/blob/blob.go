@@ -24,6 +24,7 @@ import (
 )
 
 type Config struct {
+	Type      string
 	Path      string
 	Transport transport.Transport
 	Keys      *Keyring
@@ -161,7 +162,11 @@ func (b *Blob) Download(remote string) (err error) {
 	}
 	localf = nil
 
-	tmpBundle, err := New(Config{Path: tmpBlob, Keys: b.Keys})
+	tmpBundle, err := New(Config{
+		Type: b.Type,
+		Path: tmpBlob,
+		Keys: b.Keys,
+	})
 	if err != nil {
 		return err
 	}
@@ -207,7 +212,12 @@ func (b *Blob) Sign() (err error) {
 		return err
 	}
 
-	meta, err := metadata.New(hashes, len(b.symmetricKeys) > 0, b.symmetricKeys)
+	meta, err := metadata.New(metadata.Config{
+		Type:      b.Type,
+		Hashes:    hashes,
+		Encrypted: len(b.symmetricKeys) > 0,
+		Keys:      b.symmetricKeys,
+	})
 	if err != nil {
 		return err
 	}
@@ -244,7 +254,7 @@ func (b *Blob) VerifyMetadata(metaData []byte, signature []byte) (*metadata.Meta
 	for _, pubKey := range b.Keys.Public {
 		err := pubKey.Verify(metaData, signature)
 		if err == nil {
-			return metadata.Read(metaData)
+			return metadata.Read(metaData, b.Type)
 		}
 	}
 
@@ -502,6 +512,7 @@ func (b *Blob) Move(path string) (*Blob, error) {
 	log.Infof("%s: moving to %s", b.Path, path)
 
 	newb, err := New(Config{
+		Type:      b.Type,
 		Path:      path,
 		Transport: b.Transport,
 		Keys:      b.Keys,
