@@ -68,6 +68,10 @@ tidy-tools:
 	@cd tools && GOPROXY=$(REAL_GOPROXY) go mod tidy
 	@cd tools && $(SANDBOX) go mod verify
 
+prepare-offline: tidy tidy-tools
+	@GOPROXY=$(REAL_GOPROXY) go list -m -json all >/dev/null
+	@cd tools && GOPROXY=$(REAL_GOPROXY) go list -m -json all >/dev/null
+
 build:
 	@mkdir -p $(OUTPUT)
 	@$(SANDBOX) go build -ldflags "-s -w" -o $(OUTPUT)
@@ -169,6 +173,6 @@ verify:
 qa: check test coverage
 
 .PHONY: all download download-tools tidy tidy-tools build release debug tools clean distclean
-.PHONY: test coverage
+.PHONY: test coverage prepare-offline
 .PHONY: check-nilerr check-errcheck check-revive check-gosec check-staticcheck check-vet check-fmt check-imports check
 .PHONY: fix-imports fix-fmt fix pin verify qa
