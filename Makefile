@@ -72,26 +72,6 @@ prepare-offline: tidy tidy-tools
 	@GOPROXY=$(REAL_GOPROXY) go list -m -json all >/dev/null
 	@cd tools && GOPROXY=$(REAL_GOPROXY) go list -m -json all >/dev/null
 
-build:
-	@mkdir -p $(OUTPUT)
-	@$(SANDBOX) go build -ldflags "-s -w" -o $(OUTPUT)
-	@$(SANDBOX) echo "output stored in $(OUTPUT)"
-
-release:
-	@mkdir -p $(OUTPUT_RELEASE)
-	@$(SANDBOX) echo "building $(NAME)-$(VERSION) for linux-amd64"
-	@$(SANDBOX) -os=linux -arch=amd64 go build -ldflags "-s -w" -o $(OUTPUT_RELEASE)$(NAME)-$(VERSION)-linux-amd64
-	@$(SANDBOX) echo "building $(NAME)-$(VERSION) for darwin-arm64"
-	@$(SANDBOX) -os=darwin -arch=arm64 go build -ldflags "-s -w" -o $(OUTPUT_RELEASE)$(NAME)-$(VERSION)-darwin-arm64
-	@$(SANDBOX) echo "building $(NAME)-$(VERSION) for windows-amd64"
-	@$(SANDBOX) -os=windows -arch=amd64 go build -ldflags "-s -w" -o $(OUTPUT_RELEASE)$(NAME)-$(VERSION)-windows-amd64.exe
-	@$(SANDBOX) echo "output stored in $(OUTPUT_RELEASE)"
-
-debug:
-	@mkdir -p $(OUTPUT)
-	@$(SANDBOX) go build -o $(OUTPUT)
-	@$(SANDBOX) echo "output stored in $(OUTPUT)"
-
 tools:
 	@mkdir -p $(OUTPUT_TOOLS)
 	@$(SANDBOX) go build -modfile tools/go.mod -o $(OUTPUT_TOOLS) $(TOOL_NILERR)
@@ -172,7 +152,7 @@ verify:
 
 qa: check test coverage
 
-.PHONY: all download download-tools tidy tidy-tools build release debug tools clean distclean
+.PHONY: all download download-tools tidy tidy-tools tools clean distclean
 .PHONY: test coverage prepare-offline
 .PHONY: check-nilerr check-errcheck check-revive check-gosec check-staticcheck check-vet check-fmt check-imports check
 .PHONY: fix-imports fix-fmt fix pin verify qa
