@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -14,8 +16,8 @@ import (
 	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/nacl/sign"
-	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -110,13 +112,10 @@ func ReadPublicKey(path string, purpose int) (cryptor.PublicKey, error) {
 }
 
 func fingerprintPublicKey(pubKey *[32]byte) (string, error) {
-	pubEd25519 := ed25519.PublicKey((*pubKey)[:])
-	sshPubKey, err := ssh.NewPublicKey(pubEd25519)
-	if err != nil {
-		return "", err
-	}
-
-	return ssh.FingerprintSHA256(sshPubKey), nil
+	sha256sum := sha256.Sum256(pubKey[:])
+	blake2ssum := blake2s.Sum256(pubKey[:])
+	cksum := append(sha256sum[:], blake2ssum[:]...)
+	return base64.StdEncoding.EncodeToString(cksum), nil
 }
 
 func LoadPrivateKey(data []byte, _ int) (cryptor.PrivateKey, []byte, error) {
@@ -165,18 +164,16 @@ func ReadPrivateKey(path string, purpose int) (cryptor.PrivateKey, error) {
 }
 
 func fingerprintPrivateKey(privKey *[64]byte) (string, error) {
-	privEd25519 := ed25519.PrivateKey((*privKey)[:])
-	pubEd25519, ok := privEd25519.Public().(ed25519.PublicKey)
+	priv := ed25519.PrivateKey((*privKey)[:])
+	pub, ok := priv.Public().(ed25519.PublicKey)
 	if !ok {
 		return "", cryptor.ErrInvalidKeyType
 	}
 
-	sshPubKey, err := ssh.NewPublicKey(pubEd25519)
-	if err != nil {
-		return "", err
-	}
-
-	return ssh.FingerprintSHA256(sshPubKey), nil
+	sha256sum := sha256.Sum256(pub[:])
+	blake2ssum := blake2s.Sum256(pub[:])
+	cksum := append(sha256sum[:], blake2ssum[:]...)
+	return base64.StdEncoding.EncodeToString(cksum), nil
 }
 
 func (k *PublicKey) Verify(message []byte, signature []byte) error {

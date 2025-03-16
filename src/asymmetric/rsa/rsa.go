@@ -19,7 +19,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/blake2b"
-	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/blake2s"
 )
 
 type PublicKey struct {
@@ -130,12 +130,16 @@ func ReadPublicKey(path string, purpose int) (cryptor.PublicKey, error) {
 }
 
 func fingerprintPublicKey(pubKey *rsa.PublicKey) (string, error) {
-	sshPubKey, err := ssh.NewPublicKey(pubKey)
+	pubBytes, err := x509.MarshalPKIXPublicKey(pubKey)
 	if err != nil {
 		return "", err
 	}
 
-	return ssh.FingerprintSHA256(sshPubKey), nil
+	sha256sum := sha256.Sum256(pubBytes)
+	blake2ssum := blake2s.Sum256(pubBytes)
+	cksum := append(sha256sum[:], blake2ssum[:]...)
+
+	return base64.StdEncoding.EncodeToString(cksum), nil
 }
 
 func LoadPrivateKey(data []byte, purpose int) (cryptor.PrivateKey, []byte, error) {
@@ -194,12 +198,16 @@ func ReadPrivateKey(path string, purpose int) (cryptor.PrivateKey, error) {
 }
 
 func fingerprintPrivateKey(privKey *rsa.PrivateKey) (string, error) {
-	sshPubKey, err := ssh.NewPublicKey(&privKey.PublicKey)
+	pubBytes, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
 	if err != nil {
 		return "", err
 	}
 
-	return ssh.FingerprintSHA256(sshPubKey), nil
+	sha256sum := sha256.Sum256(pubBytes)
+	blake2ssum := blake2s.Sum256(pubBytes)
+	cksum := append(sha256sum[:], blake2ssum[:]...)
+
+	return base64.StdEncoding.EncodeToString(cksum), nil
 }
 
 func (k *PublicKey) Verify(message []byte, signature []byte) error {

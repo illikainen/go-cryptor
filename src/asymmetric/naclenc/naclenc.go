@@ -14,6 +14,7 @@ import (
 	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
 )
@@ -181,7 +182,9 @@ func (k *PublicKey) Write(path string) error {
 
 func (k *PublicKey) Fingerprint() string {
 	sha256sum := sha256.Sum256(k.key[:])
-	return "SHA256:" + base64.StdEncoding.EncodeToString(sha256sum[:])
+	blake2ssum := blake2s.Sum256(k.key[:])
+	cksum := append(sha256sum[:], blake2ssum[:]...)
+	return base64.StdEncoding.EncodeToString(cksum)
 }
 
 func (k *PublicKey) Type() string {

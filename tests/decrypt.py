@@ -17,7 +17,6 @@ from Cryptodome.IO import PEM
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
 
-TEST_KEY = "NaCl+RSA:SHA256:7AnJ6HAr7270hASZ/pA5J53z42PGbzDrytC0paodtR0="
 METADATA_SIZE = 1024 * 8
 XCHACHA20_POLY1305_NONCE_SIZE = 24
 AES_GCM_NONCE_SIZE = 12
@@ -52,22 +51,47 @@ def load_keys(path):
 
     nacl_enc_pem, rest = read_key(rest)
     nacl_enc_bytes, *_ = PEM.decode(nacl_enc_pem)
-    nacl_enc_key = nacl.public.SealedBox(nacl.public.PrivateKey(nacl_enc_bytes))
+    nacl_enc_priv = nacl.public.PrivateKey(nacl_enc_bytes)
+    nacl_enc_key = nacl.public.SealedBox(nacl_enc_priv)
 
     rsa_sign_pem, rest = read_key(rest)
     rsa_sign_key = RSA.import_key(rsa_sign_pem)
+    rsa_sign_der = rsa_sign_key.public_key().export_key(format="DER")
 
     rsa_enc_pem, rest = read_key(rest)
     rsa_enc_key = RSA.import_key(rsa_enc_pem)
+    rsa_enc_der = rsa_enc_key.public_key().export_key(format="DER")
 
     if rest:
         sys.exit("bad key")
 
-    return nacl_sign_key, nacl_enc_key, rsa_sign_key, rsa_enc_key
+    fingerprints = b"".join([
+        base64.b64encode(
+            hashlib.sha256(nacl_sign_key.encode()).digest() +
+            hashlib.blake2s(nacl_sign_key.encode()).digest()
+        ),
+        base64.b64encode(
+            hashlib.sha256(nacl_enc_priv.public_key.encode()).digest() +
+            hashlib.blake2s(nacl_enc_priv.public_key.encode()).digest()
+        ),
+        base64.b64encode(
+            hashlib.sha256(rsa_sign_der).digest() +
+            hashlib.blake2s(rsa_sign_der).digest()
+        ),
+        base64.b64encode(
+            hashlib.sha256(rsa_enc_der).digest() +
+            hashlib.blake2s(rsa_enc_der).digest()
+        ),
+    ])
+    fingerprint = "NaCl+RSA:" + base64.b64encode(
+        hashlib.sha256(fingerprints).digest() + hashlib.blake2s(fingerprints).digest()
+    ).decode()
+
+    return nacl_sign_key, nacl_enc_key, rsa_sign_key, rsa_enc_key, fingerprint
 
 
 def decrypt(src, privkey):
-    nacl_sign_key, nacl_enc_key, rsa_sign_key, rsa_enc_key = load_keys(privkey)
+    nacl_sign_key, nacl_enc_key, rsa_sign_key, rsa_enc_key, fingerprint = load_keys(privkey)
 
     with open(src, "rb") as f:
         #
@@ -115,7 +139,7 @@ def decrypt(src, privkey):
         partial_plaintext = []
         rsa_oaep = PKCS1_OAEP.new(rsa_enc_key, SHA256)
 
-        xcp_key_data = metadata["Keys"][TEST_KEY + ":XChaCha20Poly1305"]
+        xcp_key_data = metadata["Keys"][fingerprint + ":XChaCha20Poly1305"]
         xcp_key_partial = rsa_oaep.decrypt(base64.b64decode(xcp_key_data))
         xcp_key = json.loads(nacl_enc_key.decrypt(base64.b64decode(xcp_key_partial)))
 
@@ -135,7 +159,7 @@ def decrypt(src, privkey):
         #
         plaintext = []
 
-        aes_key_data = metadata["Keys"][TEST_KEY + ":AESGCM"]
+        aes_key_data = metadata["Keys"][fingerprint + ":AESGCM"]
         aes_key_partial = rsa_oaep.decrypt(base64.b64decode(aes_key_data))
         aes_key = json.loads(nacl_enc_key.decrypt(base64.b64decode(aes_key_partial)))
 

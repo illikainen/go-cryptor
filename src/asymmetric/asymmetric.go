@@ -17,6 +17,7 @@ import (
 	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/blake2s"
 )
 
 const SignatureSize = naclsig.SignatureSize + rsa.SignatureSize
@@ -244,7 +245,10 @@ func (k *PublicKeyContainer) Fingerprint() string {
 		k.rsaEnc.Fingerprint(),
 	}
 	sha256sum := sha256.Sum256([]byte(strings.Join(fingerprints, "")))
-	return "SHA256:" + base64.StdEncoding.EncodeToString(sha256sum[:])
+	blake2ssum := blake2s.Sum256([]byte(strings.Join(fingerprints, "")))
+	cksum := append(sha256sum[:], blake2ssum[:]...)
+
+	return base64.StdEncoding.EncodeToString(cksum)
 }
 
 func (k *PublicKeyContainer) Type() string {
@@ -335,7 +339,10 @@ func (k *PrivateKeyContainer) Fingerprint() string {
 		k.rsaEnc.Fingerprint(),
 	}
 	sha256sum := sha256.Sum256([]byte(strings.Join(fingerprints, "")))
-	return "SHA256:" + base64.StdEncoding.EncodeToString(sha256sum[:])
+	blake2ssum := blake2s.Sum256([]byte(strings.Join(fingerprints, "")))
+	cksum := append(sha256sum[:], blake2ssum[:]...)
+
+	return base64.StdEncoding.EncodeToString(cksum)
 }
 
 func (k *PrivateKeyContainer) Type() string {
