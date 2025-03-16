@@ -146,9 +146,9 @@ func (h *Hasher) Verify(path string) (err error) {
 	}
 
 	if hex.EncodeToString(sha256sum.Sum(nil)) != h.SHA256 {
-		return errors.Wrapf(ErrInvalidHash, "%s: sha256", f.Name())
+		return errors.Wrapf(ErrInvalidHash, "%s: sha2-256", f.Name())
 	}
-	log.Infof("sha256: verified: %s", h.SHA256)
+	log.Infof("sha2-256: verified: %s", h.SHA256)
 
 	if hex.EncodeToString(keccak512sum.Sum(nil)) != h.KECCAK512 {
 		return errors.Wrapf(ErrInvalidHash, "%s: sha3-512", f.Name())
@@ -156,9 +156,9 @@ func (h *Hasher) Verify(path string) (err error) {
 	log.Infof("sha3-512: verified: %s", h.KECCAK512)
 
 	if hex.EncodeToString(blake2b512sum.Sum(nil)) != h.BLAKE2b512 {
-		return errors.Wrapf(ErrInvalidHash, "%s: blake2b512", f.Name())
+		return errors.Wrapf(ErrInvalidHash, "%s: blake2b-512", f.Name())
 	}
-	log.Infof("blake2b512: verified: %s", h.BLAKE2b512)
+	log.Infof("blake2b-512: verified: %s", h.BLAKE2b512)
 
 	return nil
 }
