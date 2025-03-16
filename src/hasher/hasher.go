@@ -2,7 +2,6 @@ package hasher
 
 import (
 	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/hex"
 	"io"
 	"os"
@@ -12,20 +11,21 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/blake2b"
+	"golang.org/x/crypto/sha3"
 )
 
 var ErrInvalidHash = errors.New("invalid hash")
 
 type Hasher struct {
 	SHA256      string
-	SHA512      string
+	KECCAK512   string
 	BLAKE2b512  string
 	HashedBytes int
 }
 
 func New(path string) (h *Hasher, err error) {
 	sha256sum := sha256.New()
-	sha512sum := sha512.New()
+	keccak512sum := sha3.New512()
 	blake2b512sum, err := blake2b.New512(nil)
 	if err != nil {
 		return nil, errors.Wrap(err, path)
@@ -62,7 +62,7 @@ func New(path string) (h *Hasher, err error) {
 			return nil, errors.Errorf("bug")
 		}
 
-		wn, err = sha512sum.Write(buf[:rn])
+		wn, err = keccak512sum.Write(buf[:rn])
 		if err != nil || wn != rn {
 			return nil, errors.Errorf("bug")
 		}
@@ -81,7 +81,7 @@ func New(path string) (h *Hasher, err error) {
 
 	return &Hasher{
 		SHA256:      hex.EncodeToString(sha256sum.Sum(nil)),
-		SHA512:      hex.EncodeToString(sha512sum.Sum(nil)),
+		KECCAK512:   hex.EncodeToString(keccak512sum.Sum(nil)),
 		BLAKE2b512:  hex.EncodeToString(blake2b512sum.Sum(nil)),
 		HashedBytes: actualSize,
 	}, nil
@@ -91,7 +91,7 @@ func (h *Hasher) Verify(path string) (err error) {
 	log.Debugf("%s: verifying checksums", path)
 
 	sha256sum := sha256.New()
-	sha512sum := sha512.New()
+	keccak512sum := sha3.New512()
 	blake2b512sum, err := blake2b.New512(nil)
 	if err != nil {
 		return err
@@ -128,7 +128,7 @@ func (h *Hasher) Verify(path string) (err error) {
 			return errors.Errorf("bug")
 		}
 
-		wn, err = sha512sum.Write(buf[:rn])
+		wn, err = keccak512sum.Write(buf[:rn])
 		if err != nil || wn != rn {
 			return errors.Errorf("bug")
 		}
@@ -150,10 +150,10 @@ func (h *Hasher) Verify(path string) (err error) {
 	}
 	log.Infof("sha256: verified: %s", h.SHA256)
 
-	if hex.EncodeToString(sha512sum.Sum(nil)) != h.SHA512 {
-		return errors.Wrapf(ErrInvalidHash, "%s: sha512", f.Name())
+	if hex.EncodeToString(keccak512sum.Sum(nil)) != h.KECCAK512 {
+		return errors.Wrapf(ErrInvalidHash, "%s: sha3-512", f.Name())
 	}
-	log.Infof("sha512: verified: %s", h.SHA512)
+	log.Infof("sha3-512: verified: %s", h.KECCAK512)
 
 	if hex.EncodeToString(blake2b512sum.Sum(nil)) != h.BLAKE2b512 {
 		return errors.Wrapf(ErrInvalidHash, "%s: blake2b512", f.Name())

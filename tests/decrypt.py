@@ -122,8 +122,8 @@ def decrypt(src, privkey):
         if sha256 != metadata["Hashes"]["SHA256"]:
             raise RuntimeError("bad digest")
 
-        sha512 = hashlib.sha512(blob).hexdigest()
-        if sha512 != metadata["Hashes"]["SHA512"]:
+        keccak512 = hashlib.sha3_512(blob).hexdigest()
+        if keccak512 != metadata["Hashes"]["KECCAK512"]:
             raise RuntimeError("bad digest")
 
         blake2b = hashlib.blake2b(blob).hexdigest()
