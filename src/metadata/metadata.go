@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/illikainen/go-cryptor/src/hasher"
+	"github.com/illikainen/go-cryptor/src/symmetric"
 
 	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
@@ -16,7 +17,7 @@ type Config struct {
 	Type      string
 	Hashes    *hasher.Hasher
 	Encrypted bool
-	Keys      map[string]string
+	Keys      map[string]*symmetric.Keys
 }
 
 type Metadata struct {
@@ -24,7 +25,7 @@ type Metadata struct {
 	Version   uint32
 	Timestamp int64
 	Encrypted bool
-	Keys      map[string]string
+	Keys      map[string]*symmetric.Keys
 	Hashes    *hasher.Hasher
 }
 

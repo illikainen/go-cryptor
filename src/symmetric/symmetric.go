@@ -8,6 +8,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type Keys struct {
+	AESGCM            string
+	XChaCha20Poly1305 string
+}
+
 func GenerateKey(kind int) (cryptor.SymmetricKey, error) {
 	log.Tracef("generate symmetric key for kind=%d", kind)
 

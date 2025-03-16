@@ -33,7 +33,7 @@ type Config struct {
 type Blob struct {
 	Config
 	name          string
-	symmetricKeys map[string]string
+	symmetricKeys map[string]*symmetric.Keys
 }
 
 type Keyring struct {
@@ -52,7 +52,7 @@ func New(config Config) (*Blob, error) {
 	b := &Blob{
 		Config:        config,
 		name:          file,
-		symmetricKeys: map[string]string{},
+		symmetricKeys: map[string]*symmetric.Keys{},
 	}
 
 	return b, nil
@@ -349,7 +349,8 @@ func (b *Blob) Encrypt() (err error) {
 			return err
 		}
 
-		b.symmetricKeys[pubKey.String()+":AESGCM"] = ciphertext
+		b.symmetricKeys[pubKey.Fingerprint()] = &symmetric.Keys{}
+		b.symmetricKeys[pubKey.Fingerprint()].AESGCM = ciphertext
 	}
 
 	xcpKey, err := symmetric.GenerateKey(cryptor.XCHACHA20POLY1305Symmetric)
@@ -374,13 +375,13 @@ func (b *Blob) Encrypt() (err error) {
 			return err
 		}
 
-		b.symmetricKeys[pubKey.String()+":XChaCha20Poly1305"] = ciphertext
+		b.symmetricKeys[pubKey.Fingerprint()].XChaCha20Poly1305 = ciphertext
 	}
 
 	return b.Import(tmpBlobXCP, nil)
 }
 
-func (b *Blob) Decrypt(in string, out string, keys map[string]string) (err error) {
+func (b *Blob) Decrypt(in string, out string, keys map[string]*symmetric.Keys) (err error) {
 	log.Tracef("%s: decrypt to %s", in, out)
 
 	tmpBlob := in
@@ -390,17 +391,17 @@ func (b *Blob) Decrypt(in string, out string, keys map[string]string) (err error
 	}
 	defer errorx.Defer(tmpClean, &err)
 
-	xcpCiphertext, ok := keys[b.Keys.Private.String()+":XChaCha20Poly1305"]
+	symKeys, ok := keys[b.Keys.Private.Fingerprint()]
 	if !ok {
-		return errors.Errorf("missing XChaCha20Poly1305 key")
+		return errors.Errorf("missing symmetric keys for %s", b.Keys.Private.Fingerprint())
 	}
 
-	xcpPlaintext, err := b.Keys.Private.Decrypt(xcpCiphertext)
+	xcpKeyData, err := b.Keys.Private.Decrypt(symKeys.XChaCha20Poly1305)
 	if err != nil {
 		return err
 	}
 
-	xcpKey, err := symmetric.ReadKey(cryptor.XCHACHA20POLY1305Symmetric, xcpPlaintext)
+	xcpKey, err := symmetric.ReadKey(cryptor.XCHACHA20POLY1305Symmetric, xcpKeyData)
 	if err != nil {
 		return err
 	}
@@ -411,17 +412,12 @@ func (b *Blob) Decrypt(in string, out string, keys map[string]string) (err error
 		return err
 	}
 
-	aesCiphertext, ok := keys[b.Keys.Private.String()+":AESGCM"]
-	if !ok {
-		return errors.Errorf("missing AES-GCM key")
-	}
-
-	aesPlaintext, err := b.Keys.Private.Decrypt(aesCiphertext)
+	aesKeyData, err := b.Keys.Private.Decrypt(symKeys.AESGCM)
 	if err != nil {
 		return err
 	}
 
-	aesKey, err := symmetric.ReadKey(cryptor.AESGCMSymmetric, aesPlaintext)
+	aesKey, err := symmetric.ReadKey(cryptor.AESGCMSymmetric, aesKeyData)
 	if err != nil {
 		return err
 	}

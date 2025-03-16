@@ -83,7 +83,7 @@ def load_keys(path):
             hashlib.blake2s(rsa_enc_der).digest()
         ),
     ])
-    fingerprint = "NaCl+RSA:" + base64.b64encode(
+    fingerprint = base64.b64encode(
         hashlib.sha256(fingerprints).digest() + hashlib.blake2s(fingerprints).digest()
     ).decode()
 
@@ -139,7 +139,7 @@ def decrypt(src, privkey):
         partial_plaintext = []
         rsa_oaep = PKCS1_OAEP.new(rsa_enc_key, SHA256)
 
-        xcp_key_data = metadata["Keys"][fingerprint + ":XChaCha20Poly1305"]
+        xcp_key_data = metadata["Keys"][fingerprint]["XChaCha20Poly1305"]
         xcp_key_partial = rsa_oaep.decrypt(base64.b64decode(xcp_key_data))
         xcp_key = json.loads(nacl_enc_key.decrypt(base64.b64decode(xcp_key_partial)))
 
@@ -159,7 +159,7 @@ def decrypt(src, privkey):
         #
         plaintext = []
 
-        aes_key_data = metadata["Keys"][fingerprint + ":AESGCM"]
+        aes_key_data = metadata["Keys"][fingerprint]["AESGCM"]
         aes_key_partial = rsa_oaep.decrypt(base64.b64decode(aes_key_data))
         aes_key = json.loads(nacl_enc_key.decrypt(base64.b64decode(aes_key_partial)))
 
