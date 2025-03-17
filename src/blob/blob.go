@@ -236,7 +236,7 @@ func (b *Blob) Sign() (err error) {
 		b.Keys.Private,
 		strings.TrimRight(string(metaData), "\x00"),
 	)
-	log.Infof("metadata: %s: signed json", b.Keys.Private)
+	log.Infof("metadata: %s: signed json (%d bytes)", b.Keys.Private, len(metaData))
 
 	header := []byte{}
 	header = append(header, metaData...)
