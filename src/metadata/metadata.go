@@ -66,6 +66,19 @@ func Read(data []byte, typ string) (*Metadata, error) {
 }
 
 func (m *Metadata) Marshal() ([]byte, error) {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+
+	if !bytes.Equal(stringx.Sanitize(data), data) {
+		return nil, errors.Errorf("metadata contains invalid characters")
+	}
+
+	return data, nil
+}
+
+func (m *Metadata) MarshalIndent() ([]byte, error) {
 	data, err := json.MarshalIndent(m, "", "    ")
 	if err != nil {
 		return nil, err
