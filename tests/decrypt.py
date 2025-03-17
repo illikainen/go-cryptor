@@ -5,6 +5,7 @@ import base64
 import hashlib
 import io
 import json
+import struct
 import sys
 import zipfile
 from pathlib import Path
@@ -17,7 +18,6 @@ from Cryptodome.IO import PEM
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
 
-METADATA_SIZE = 1024 * 8
 XCHACHA20_POLY1305_NONCE_SIZE = 24
 AES_GCM_NONCE_SIZE = 12
 ED25519_SIGNATURE_SIZE = 64
@@ -97,7 +97,8 @@ def decrypt(src, privkey):
         #
         # 1. Read and verify metadata signatures with NaCl and RSA.
         #
-        metadata_bytes = f.read(METADATA_SIZE)
+        metadata_size = struct.unpack(">I", f.read(struct.calcsize(">I")))[0]
+        metadata_bytes = f.read(metadata_size)
 
         nacl_signature = f.read(ED25519_SIGNATURE_SIZE)
         nacl_sign_key.verify(metadata_bytes, nacl_signature)
@@ -107,7 +108,7 @@ def decrypt(src, privkey):
         rsa_pss = pss.new(rsa_sign_key.public_key(), salt_bytes=PSS_SALT_SIZE)
         rsa_pss.verify(rsa_hash, rsa_signature)
 
-        metadata = json.loads(metadata_bytes.rstrip(b"\x00"))
+        metadata = json.loads(metadata_bytes)
 
         #
         # 2. Read encrypted blob.

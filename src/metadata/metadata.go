@@ -1,14 +1,12 @@
 package metadata
 
 import (
-	"bytes"
 	"encoding/json"
 	"time"
 
 	"github.com/illikainen/go-cryptor/src/hasher"
 	"github.com/illikainen/go-cryptor/src/symmetric"
 
-	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -29,7 +27,6 @@ type Metadata struct {
 	Hashes    *hasher.Hasher
 }
 
-const MetadataSize = 1024 * 8
 const Version = 0
 
 func New(config Config) (*Metadata, error) {
@@ -46,7 +43,7 @@ func New(config Config) (*Metadata, error) {
 func Read(data []byte, typ string) (*Metadata, error) {
 	md := &Metadata{}
 
-	err := json.Unmarshal(bytes.TrimRight(data, "\x00"), md)
+	err := json.Unmarshal(data, md)
 	if err != nil {
 		return nil, err
 	}
@@ -63,26 +60,12 @@ func Read(data []byte, typ string) (*Metadata, error) {
 }
 
 func (m *Metadata) Marshal() ([]byte, error) {
-	tmp, err := json.MarshalIndent(m, "", "    ")
+	data, err := json.MarshalIndent(m, "", "    ")
 	if err != nil {
 		return nil, err
 	}
-	tmp = append(tmp, '\n')
-
-	if len(tmp) > MetadataSize {
-		return nil, iofs.ErrInvalidSize
-	}
-
-	data := [MetadataSize]byte{}
-	for i := range data {
-		if i < len(tmp) {
-			data[i] = tmp[i]
-		} else {
-			data[i] = 0
-		}
-	}
-
-	return data[:], nil
+	data = append(data, '\n')
+	return data, nil
 }
 
 func (m *Metadata) Compare(other *Metadata) int64 {

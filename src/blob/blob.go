@@ -1,11 +1,13 @@
 package blob
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+	"unsafe"
 
 	"github.com/illikainen/go-cryptor/src/asymmetric"
 	"github.com/illikainen/go-cryptor/src/asymmetric/naclsig"
@@ -45,8 +47,6 @@ var ErrInvalidKeyUsage = errors.New("key usage overlap")
 var ErrInvalidHeaderSize = errors.New("invalid header size")
 var ErrNotVerified = errors.New("the bundle has not been verified")
 
-const headerSize = metadata.MetadataSize + naclsig.SignatureSize + rsa.SignatureSize
-
 func New(config Config) (*Blob, error) {
 	_, file := filepath.Split(config.Path)
 	b := &Blob{
@@ -73,7 +73,16 @@ func (b *Blob) Download(remote string) (err error) {
 	}
 	defer errorx.Defer(remotef.Close, &err)
 
-	metaData := make([]byte, metadata.MetadataSize)
+	metaDataSize := uint32(0)
+	err = binary.Read(remotef, binary.BigEndian, &metaDataSize)
+	if err != nil {
+		return err
+	}
+	if metaDataSize == 0 {
+		return errors.Errorf("invalid metadata size")
+	}
+
+	metaData := make([]byte, metaDataSize)
 	err = iofs.ReadFull(remotef, metaData)
 	if err != nil {
 		return err
@@ -129,6 +138,11 @@ func (b *Blob) Download(remote string) (err error) {
 			err = errorx.Join(err, localf.Close())
 		}
 	}()
+
+	err = binary.Write(localf, binary.BigEndian, uint32(len(metaData)))
+	if err != nil {
+		return err
+	}
 
 	_, err = localf.Write(metaData)
 	if err != nil {
@@ -232,17 +246,26 @@ func (b *Blob) Sign() (err error) {
 		return err
 	}
 
-	log.Tracef("metadata: %s: signed json\n%s",
-		b.Keys.Private,
-		strings.TrimRight(string(metaData), "\x00"),
-	)
+	log.Tracef("metadata: %s: signed json\n%s", b.Keys.Private, metaData)
 	log.Infof("metadata: %s: signed json (%d bytes)", b.Keys.Private, len(metaData))
 
-	header := []byte{}
-	header = append(header, metaData...)
-	header = append(header, signature...)
+	header := bytes.Buffer{}
+	err = binary.Write(&header, binary.BigEndian, uint32(len(metaData)))
+	if err != nil {
+		return err
+	}
 
-	err = b.Import(tmpBlob, header)
+	err = iofs.Copy(&header, bytes.NewReader(metaData))
+	if err != nil {
+		return err
+	}
+
+	err = iofs.Copy(&header, bytes.NewReader(signature))
+	if err != nil {
+		return err
+	}
+
+	err = b.Import(tmpBlob, header.Bytes())
 	if err != nil {
 		return err
 	}
@@ -270,7 +293,16 @@ func (b *Blob) Verify(out string) (meta *metadata.Metadata, err error) {
 	}
 	defer errorx.Defer(f.Close, &err)
 
-	metaData := make([]byte, metadata.MetadataSize)
+	metaDataSize := uint32(0)
+	err = binary.Read(f, binary.BigEndian, &metaDataSize)
+	if err != nil {
+		return nil, err
+	}
+	if metaDataSize == 0 {
+		return nil, errors.Errorf("invalid metadata size")
+	}
+
+	metaData := make([]byte, metaDataSize)
 	err = iofs.ReadFull(f, metaData)
 	if err != nil {
 		return nil, err
@@ -440,7 +472,13 @@ func (b *Blob) Export(out string) (err error) {
 	}
 	defer errorx.Defer(inf.Close, &err)
 
-	metaData := make([]byte, metadata.MetadataSize)
+	metaDataSize := uint32(0)
+	err = binary.Read(inf, binary.BigEndian, &metaDataSize)
+	if err != nil {
+		return err
+	}
+
+	metaData := make([]byte, metaDataSize)
 	err = iofs.ReadFull(inf, metaData)
 	if err != nil {
 		return err
@@ -488,7 +526,9 @@ func (b *Blob) Import(in string, header []byte) (err error) {
 	defer errorx.Defer(outf.Close, &err)
 
 	if header == nil {
-		header = make([]byte, headerSize)
+		metaSize := unsafe.Sizeof(uint32(0)) // #nosec G103
+		buf := bytes.NewBuffer(make([]byte, metaSize+asymmetric.SignatureSize))
+		header = buf.Bytes()
 	}
 
 	_, err = outf.Write(header)

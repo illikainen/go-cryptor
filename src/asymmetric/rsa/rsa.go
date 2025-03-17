@@ -13,7 +13,6 @@ import (
 	"os"
 
 	"github.com/illikainen/go-cryptor/src/cryptor"
-	"github.com/illikainen/go-cryptor/src/metadata"
 
 	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
@@ -211,6 +210,10 @@ func fingerprintPrivateKey(privKey *rsa.PrivateKey) (string, error) {
 }
 
 func (k *PublicKey) Verify(message []byte, signature []byte) error {
+	if len(message) <= 0 {
+		return iofs.ErrInvalidSize
+	}
+
 	if len(signature) != SignatureSize {
 		return cryptor.ErrInvalidSignature
 	}
@@ -291,12 +294,12 @@ func (k *PublicKey) String() string {
 }
 
 func (k *PrivateKey) Sign(message []byte) ([]byte, error) {
-	if k.purpose != cryptor.SignPurpose {
-		return nil, cryptor.ErrWrongPurpose
+	if len(message) <= 0 {
+		return nil, iofs.ErrInvalidSize
 	}
 
-	if len(message) != metadata.MetadataSize {
-		return nil, iofs.ErrInvalidSize
+	if k.purpose != cryptor.SignPurpose {
+		return nil, cryptor.ErrWrongPurpose
 	}
 
 	// NaCl uses Ed25519 with SHA-512 for signing so we opt for BLAKE2b to

@@ -11,7 +11,6 @@ import (
 	"os"
 
 	"github.com/illikainen/go-cryptor/src/cryptor"
-	"github.com/illikainen/go-cryptor/src/metadata"
 
 	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
@@ -177,16 +176,15 @@ func fingerprintPrivateKey(privKey *[64]byte) (string, error) {
 }
 
 func (k *PublicKey) Verify(message []byte, signature []byte) error {
+	if len(message) <= 0 {
+		return iofs.ErrInvalidSize
+	}
+
 	if len(signature) != SignatureSize {
 		return cryptor.ErrInvalidSignature
 	}
 
-	if len(message) != metadata.MetadataSize {
-		return iofs.ErrInvalidSize
-	}
-
 	sig := append(signature, message...)
-
 	verified, ok := sign.Open(nil, sig, k.key)
 	if !ok || len(verified) != len(sig)-sign.Overhead || !bytes.Equal(verified, message) {
 		return cryptor.ErrInvalidSignature
@@ -250,7 +248,7 @@ func (k *PublicKey) String() string {
 }
 
 func (k *PrivateKey) Sign(message []byte) ([]byte, error) {
-	if len(message) != metadata.MetadataSize {
+	if len(message) <= 0 {
 		return nil, iofs.ErrInvalidSize
 	}
 
