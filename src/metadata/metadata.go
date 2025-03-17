@@ -1,12 +1,14 @@
 package metadata
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 
 	"github.com/illikainen/go-cryptor/src/hasher"
 	"github.com/illikainen/go-cryptor/src/symmetric"
 
+	"github.com/illikainen/go-utils/src/stringx"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -41,6 +43,10 @@ func New(config Config) (*Metadata, error) {
 }
 
 func Read(data []byte, typ string) (*Metadata, error) {
+	if !bytes.Equal(stringx.Sanitize(data), data) {
+		return nil, errors.Errorf("metadata contains invalid characters")
+	}
+
 	md := &Metadata{}
 
 	err := json.Unmarshal(data, md)
@@ -65,6 +71,11 @@ func (m *Metadata) Marshal() ([]byte, error) {
 		return nil, err
 	}
 	data = append(data, '\n')
+
+	if !bytes.Equal(stringx.Sanitize(data), data) {
+		return nil, errors.Errorf("metadata contains invalid characters")
+	}
+
 	return data, nil
 }
 
