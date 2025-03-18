@@ -2,7 +2,7 @@ package hasher
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"io"
 	"os"
 
@@ -80,9 +80,9 @@ func New(path string) (h *Hasher, err error) {
 	}
 
 	return &Hasher{
-		SHA256:      hex.EncodeToString(sha256sum.Sum(nil)),
-		KECCAK512:   hex.EncodeToString(keccak512sum.Sum(nil)),
-		BLAKE2b512:  hex.EncodeToString(blake2b512sum.Sum(nil)),
+		SHA256:      base64.StdEncoding.EncodeToString(sha256sum.Sum(nil)),
+		KECCAK512:   base64.StdEncoding.EncodeToString(keccak512sum.Sum(nil)),
+		BLAKE2b512:  base64.StdEncoding.EncodeToString(blake2b512sum.Sum(nil)),
 		HashedBytes: actualSize,
 	}, nil
 }
@@ -145,17 +145,17 @@ func (h *Hasher) Verify(path string) (err error) {
 		return errors.Wrap(iofs.ErrInvalidSize, path)
 	}
 
-	if hex.EncodeToString(sha256sum.Sum(nil)) != h.SHA256 {
+	if base64.StdEncoding.EncodeToString(sha256sum.Sum(nil)) != h.SHA256 {
 		return errors.Wrapf(ErrInvalidHash, "%s: sha2-256", f.Name())
 	}
 	log.Infof("sha2-256: verified: %s", h.SHA256)
 
-	if hex.EncodeToString(keccak512sum.Sum(nil)) != h.KECCAK512 {
+	if base64.StdEncoding.EncodeToString(keccak512sum.Sum(nil)) != h.KECCAK512 {
 		return errors.Wrapf(ErrInvalidHash, "%s: sha3-512", f.Name())
 	}
 	log.Infof("sha3-512: verified: %s", h.KECCAK512)
 
-	if hex.EncodeToString(blake2b512sum.Sum(nil)) != h.BLAKE2b512 {
+	if base64.StdEncoding.EncodeToString(blake2b512sum.Sum(nil)) != h.BLAKE2b512 {
 		return errors.Wrapf(ErrInvalidHash, "%s: blake2b-512", f.Name())
 	}
 	log.Infof("blake2b-512: verified: %s", h.BLAKE2b512)

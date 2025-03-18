@@ -119,15 +119,15 @@ def decrypt(src, privkey):
         # 3. Verify the encrypted blob with digests from the metadata
         #    that was verified in #1.
         #
-        sha256 = hashlib.sha256(blob).hexdigest()
+        sha256 = base64.b64encode(hashlib.sha256(blob).digest()).decode()
         if sha256 != metadata["Hashes"]["SHA256"]:
             raise RuntimeError("bad digest")
 
-        keccak512 = hashlib.sha3_512(blob).hexdigest()
+        keccak512 = base64.b64encode(hashlib.sha3_512(blob).digest()).decode()
         if keccak512 != metadata["Hashes"]["KECCAK512"]:
             raise RuntimeError("bad digest")
 
-        blake2b = hashlib.blake2b(blob).hexdigest()
+        blake2b = base64.b64encode(hashlib.blake2b(blob).digest()).decode()
         if blake2b != metadata["Hashes"]["BLAKE2b512"]:
             raise RuntimeError("bad digest")
 
