@@ -10,13 +10,11 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
-	"os"
 
 	"github.com/illikainen/go-cryptor/src/cryptor"
 
 	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/blake2s"
 )
@@ -105,29 +103,6 @@ func LoadPublicKey(data []byte, purpose int) (cryptor.PublicKey, []byte, error) 
 	}, rest, nil
 }
 
-func ReadPublicKey(path string, purpose int) (cryptor.PublicKey, error) {
-	_, ok := publicKeyType[purpose]
-	if !ok {
-		return nil, cryptor.ErrInvalidPurpose
-	}
-
-	buf, err := iofs.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	pubKey, rest, err := LoadPublicKey(buf, purpose)
-	if err != nil {
-		return nil, err
-	}
-	if len(rest) != 0 {
-		return nil, iofs.ErrInvalidSize
-	}
-
-	log.Debugf("%s: read %s", path, pubKey)
-	return pubKey, nil
-}
-
 func fingerprintPublicKey(pubKey *rsa.PublicKey) (string, error) {
 	pubBytes, err := x509.MarshalPKIXPublicKey(pubKey)
 	if err != nil {
@@ -171,29 +146,6 @@ func LoadPrivateKey(data []byte, purpose int) (cryptor.PrivateKey, []byte, error
 		fingerprint: fingerprint,
 		purpose:     purpose,
 	}, rest, nil
-}
-
-func ReadPrivateKey(path string, purpose int) (cryptor.PrivateKey, error) {
-	_, ok := privateKeyType[purpose]
-	if !ok {
-		return nil, cryptor.ErrInvalidPurpose
-	}
-
-	buf, err := iofs.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	privKey, rest, err := LoadPrivateKey(buf, purpose)
-	if err != nil {
-		return nil, err
-	}
-	if len(rest) != 0 {
-		return nil, iofs.ErrInvalidSize
-	}
-
-	log.Debugf("%s: read %s", path, privKey)
-	return privKey, nil
 }
 
 func fingerprintPrivateKey(privKey *rsa.PrivateKey) (string, error) {
@@ -256,29 +208,8 @@ func (k *PublicKey) Export() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (k *PublicKey) Write(path string) error {
-	exists, err := iofs.Exists(path)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return errors.Wrap(cryptor.ErrPathExists, path)
-	}
-
-	log.Infof("%s: writing public key for %s", path, k)
-
-	export, err := k.Export()
-	if err != nil {
-		return err
-	}
-
-	err = os.WriteFile(path, export, 0600)
-	if err != nil {
-		return err
-	}
-
-	log.Debugf("%s: wrote %s", path, k)
-	return nil
+func (k *PublicKey) Write(_ string) error {
+	return cryptor.ErrNotImplemented
 }
 
 func (k *PublicKey) Fingerprint() string {
@@ -342,29 +273,8 @@ func (k *PrivateKey) Export() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (k *PrivateKey) Write(path string) error {
-	exists, err := iofs.Exists(path)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return errors.Wrap(cryptor.ErrPathExists, path)
-	}
-
-	log.Infof("%s: writing private key for %s", path, k)
-
-	export, err := k.Export()
-	if err != nil {
-		return err
-	}
-
-	err = os.WriteFile(path, export, 0600)
-	if err != nil {
-		return err
-	}
-
-	log.Debugf("%s: wrote %s", path, k)
-	return nil
+func (k *PrivateKey) Write(_ string) error {
+	return cryptor.ErrNotImplemented
 }
 
 func (k *PrivateKey) Fingerprint() string {
