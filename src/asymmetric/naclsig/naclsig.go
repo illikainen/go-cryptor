@@ -184,7 +184,10 @@ func (k *PublicKey) Verify(message []byte, signature []byte) error {
 		return cryptor.ErrInvalidSignature
 	}
 
-	sig := append(signature, message...)
+	sig := []byte{}
+	sig = append(sig, signature...)
+	sig = append(sig, message...)
+
 	verified, ok := sign.Open(nil, sig, k.key)
 	if !ok || len(verified) != len(sig)-sign.Overhead || !bytes.Equal(verified, message) {
 		return cryptor.ErrInvalidSignature
