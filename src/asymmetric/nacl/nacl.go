@@ -17,23 +17,23 @@ func GenerateKey(purpose int) (cryptor.PublicKey, cryptor.PrivateKey, error) {
 	return nil, nil, cryptor.ErrInvalidPurpose
 }
 
-func LoadPublicKey(data []byte, purpose int) (cryptor.PublicKey, []byte, error) {
+func LoadPublicKeyLegacy(data []byte, purpose int) (cryptor.PublicKey, []byte, error) {
 	switch purpose {
 	case cryptor.SignPurpose:
-		return naclsig.LoadPublicKey(data, purpose)
+		return naclsig.LoadPublicKeyLegacy(data, purpose)
 	case cryptor.EncryptPurpose:
-		return naclenc.LoadPublicKey(data, purpose)
+		return naclenc.LoadPublicKeyLegacy(data, purpose)
 	}
 
 	return nil, nil, cryptor.ErrInvalidPurpose
 }
 
-func LoadPrivateKey(data []byte, purpose int) (cryptor.PrivateKey, []byte, error) {
+func LoadPrivateKeyLegacy(data []byte, purpose int) (cryptor.PrivateKey, []byte, error) {
 	switch purpose {
 	case cryptor.SignPurpose:
-		return naclsig.LoadPrivateKey(data, purpose)
+		return naclsig.LoadPrivateKeyLegacy(data, purpose)
 	case cryptor.EncryptPurpose:
-		return naclenc.LoadPrivateKey(data, purpose)
+		return naclenc.LoadPrivateKeyLegacy(data, purpose)
 	}
 
 	return nil, nil, cryptor.ErrInvalidPurpose

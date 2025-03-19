@@ -28,42 +28,22 @@ RSA_SIGNATURE_SIZE = int(4096 / 8)
 PSS_SALT_SIZE = 446
 
 
-def read_key(lines):
-    if not lines[0].startswith("-----BEGIN"):
-        raise RuntimeError("bad key")
-
-    key = []
-    for i, line in enumerate(lines):
-        key.append(line)
-        if line.startswith("-----END"):
-            break
-
-    return "\n".join(key), lines[i + 1:]
-
-
 def load_keys(path):
-    lines = path.read_text().splitlines()
+    key = json.loads(base64.b64decode(path.read_text()))
 
-    nacl_sign_pem, rest = read_key(lines)
-    nacl_sign_bytes, *_ = PEM.decode(nacl_sign_pem)
+    nacl_sign_bytes = base64.b64decode(key["NaCl"]["Sign"])
     nacl_sign_seed = nacl.bindings.crypto_sign_ed25519_sk_to_seed(nacl_sign_bytes)
     nacl_sign_key = nacl.signing.SigningKey(nacl_sign_seed).verify_key
 
-    nacl_enc_pem, rest = read_key(rest)
-    nacl_enc_bytes, *_ = PEM.decode(nacl_enc_pem)
+    nacl_enc_bytes = base64.b64decode(key["NaCl"]["Encrypt"])
     nacl_enc_priv = nacl.public.PrivateKey(nacl_enc_bytes)
     nacl_enc_key = nacl.public.SealedBox(nacl_enc_priv)
 
-    rsa_sign_pem, rest = read_key(rest)
-    rsa_sign_key = RSA.import_key(rsa_sign_pem)
+    rsa_sign_key = RSA.import_key(base64.b64decode(key["RSA"]["Sign"]))
     rsa_sign_der = rsa_sign_key.public_key().export_key(format="DER")
 
-    rsa_enc_pem, rest = read_key(rest)
-    rsa_enc_key = RSA.import_key(rsa_enc_pem)
+    rsa_enc_key = RSA.import_key(base64.b64decode(key["RSA"]["Encrypt"]))
     rsa_enc_der = rsa_enc_key.public_key().export_key(format="DER")
-
-    if rest:
-        sys.exit("bad key")
 
     fingerprints = b"".join([
         base64.b64encode(

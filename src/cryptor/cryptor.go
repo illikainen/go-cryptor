@@ -14,20 +14,18 @@ import (
 type PublicKey interface {
 	Verify([]byte, []byte) error
 	Encrypt([]byte) (string, error)
-	Export() ([]byte, error)
+	UnmarshalJSON([]byte) error
 	Write(string) error
 	Fingerprint() string
-	Type() string
 	String() string
 }
 
 type PrivateKey interface {
 	Sign([]byte) ([]byte, error)
 	Decrypt(string) ([]byte, error)
-	Export() ([]byte, error)
+	UnmarshalJSON([]byte) error
 	Write(string) error
 	Fingerprint() string
-	Type() string
 	String() string
 }
 
@@ -60,15 +58,16 @@ var SymmetricMap = map[string]int{
 }
 
 const (
+	UnknownKeyType = iota
+	PublicKeyType
+	PrivateKeyType
+)
+
+const (
 	UnknownPurpose = iota
 	SignPurpose
 	EncryptPurpose
 )
-
-var PurposeMap = map[string]int{
-	"sign":    SignPurpose,
-	"encrypt": EncryptPurpose,
-}
 
 var ErrInvalidSignature = errors.New("invalid signature")
 var ErrInvalidKey = errors.New("invalid key")

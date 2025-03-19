@@ -1,10 +1,10 @@
 package naclenc
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 
@@ -46,7 +46,7 @@ func GenerateKey(purpose int) (cryptor.PublicKey, cryptor.PrivateKey, error) {
 	return pubKey, privKey, nil
 }
 
-func LoadPublicKey(data []byte, _ int) (cryptor.PublicKey, []byte, error) {
+func LoadPublicKeyLegacy(data []byte, _ int) (cryptor.PublicKey, []byte, error) {
 	block, rest := pem.Decode(data)
 	if block == nil {
 		return nil, nil, errors.Errorf("PEM decoding error")
@@ -61,7 +61,7 @@ func LoadPublicKey(data []byte, _ int) (cryptor.PublicKey, []byte, error) {
 	return &PublicKey{key: pubBytes}, rest, nil
 }
 
-func LoadPrivateKey(data []byte, _ int) (cryptor.PrivateKey, []byte, error) {
+func LoadPrivateKeyLegacy(data []byte, _ int) (cryptor.PrivateKey, []byte, error) {
 	block, rest := pem.Decode(data)
 	if block == nil {
 		return nil, nil, errors.Errorf("PEM decoding error")
@@ -96,17 +96,29 @@ func (k *PublicKey) Encrypt(plaintext []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-func (k *PublicKey) Export() ([]byte, error) {
-	buf := bytes.Buffer{}
-	err := pem.Encode(&buf, &pem.Block{
-		Type:  publicKeyType,
-		Bytes: k.key[:],
-	})
+func (k *PublicKey) MarshalJSON() ([]byte, error) {
+	return json.Marshal(base64.StdEncoding.EncodeToString(k.key[:]))
+}
+
+func (k *PublicKey) UnmarshalJSON(data []byte) error {
+	var str string
+	err := json.Unmarshal(data, &str)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return buf.Bytes(), nil
+	tmp, err := base64.StdEncoding.DecodeString(str)
+	if err != nil {
+		return err
+	}
+
+	key := &[32]byte{}
+	if len(tmp) != 32 || copy(key[:], tmp) != 32 {
+		return cryptor.ErrInvalidKeyType
+	}
+
+	k.key = key
+	return nil
 }
 
 func (k *PublicKey) Write(_ string) error {
@@ -118,10 +130,6 @@ func (k *PublicKey) Fingerprint() string {
 	blake2ssum := blake2s.Sum256(k.key[:])
 	cksum := append(sha256sum[:], blake2ssum[:]...)
 	return base64.StdEncoding.EncodeToString(cksum)
-}
-
-func (k *PublicKey) Type() string {
-	return "nacl"
 }
 
 func (k *PublicKey) String() string {
@@ -149,17 +157,29 @@ func (k *PrivateKey) Decrypt(ciphertext string) ([]byte, error) {
 	return plaintext, nil
 }
 
-func (k *PrivateKey) Export() ([]byte, error) {
-	buf := bytes.Buffer{}
-	err := pem.Encode(&buf, &pem.Block{
-		Type:  privateKeyType,
-		Bytes: k.key[:],
-	})
+func (k *PrivateKey) MarshalJSON() ([]byte, error) {
+	return json.Marshal(base64.StdEncoding.EncodeToString(k.key[:]))
+}
+
+func (k *PrivateKey) UnmarshalJSON(data []byte) error {
+	var str string
+	err := json.Unmarshal(data, &str)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return buf.Bytes(), nil
+	tmp, err := base64.StdEncoding.DecodeString(str)
+	if err != nil {
+		return err
+	}
+
+	key := &[32]byte{}
+	if len(tmp) != 32 || copy(key[:], tmp) != 32 {
+		return cryptor.ErrInvalidKeyType
+	}
+
+	k.key = key
+	return nil
 }
 
 func (k *PrivateKey) Write(_ string) error {
@@ -171,10 +191,6 @@ func (k *PrivateKey) Fingerprint() string {
 	curve25519.ScalarBaseMult(pubBytes, k.key)
 
 	return (&PublicKey{key: pubBytes}).Fingerprint()
-}
-
-func (k *PrivateKey) Type() string {
-	return "nacl"
 }
 
 func (k *PrivateKey) String() string {
