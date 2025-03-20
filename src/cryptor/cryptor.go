@@ -299,9 +299,7 @@ func DecryptFlags(config DecryptConfig) *pflag.FlagSet {
 		&config.Options.Extract,
 		config.Prefix+"extract",
 		lo.Ternary(config.Prefix == "", "e", ""),
-		flag.Path{
-			State: flag.MustNotExist,
-		},
+		flag.Path{},
 		"Extreact the plaintext to this directory",
 	)
 
