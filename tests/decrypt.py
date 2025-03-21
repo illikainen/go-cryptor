@@ -7,7 +7,7 @@ import io
 import json
 import struct
 import sys
-import zipfile
+import tarfile
 from pathlib import Path
 
 import nacl.bindings
@@ -160,7 +160,7 @@ def decrypt(src, privkey):
         #
         # 6. Return the plaintext archive.
         #
-        return zipfile.ZipFile(io.BytesIO(b"".join(plaintext)))
+        return tarfile.TarFile(fileobj=io.BytesIO(b"".join(plaintext)))
 
 
 def parse_args():
@@ -173,12 +173,12 @@ def parse_args():
 def main():
     args = parse_args()
     content = []
-    with decrypt(args.src, args.privkey) as z:
-        for name in z.namelist():
-            with z.open(name) as f:
-                data = f.read()
+    with decrypt(args.src, args.privkey) as t:
+        for member in t.getmembers():
+            if not member.isdir():
+                data = t.extractfile(member).read()
                 content.append({
-                    "path": name,
+                    "path": member.path,
                     "data": data.decode(),
                     "sha256": hashlib.sha256(data).hexdigest(),
                 })
