@@ -8,41 +8,42 @@ import (
 	"github.com/illikainen/go-cryptor/src/hasher"
 	"github.com/illikainen/go-cryptor/src/symmetric"
 
+	"github.com/illikainen/go-utils/src/iofs"
 	"github.com/illikainen/go-utils/src/stringx"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 type Config struct {
 	Type      string
-	Hashes    *hasher.Hasher
 	Encrypted bool
 	Keys      map[string]*symmetric.Keys
+	ChunkSize uint32
 }
 
 type Metadata struct {
-	Type      string
+	Config
 	Version   uint32
 	Timestamp int64
-	Encrypted bool
-	Keys      map[string]*symmetric.Keys
-	Hashes    *hasher.Hasher
+	Hashes    *hasher.Writer
 }
 
 const Version = 0
 
 func New(config Config) (*Metadata, error) {
+	hashes, err := hasher.NewWriter()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Metadata{
-		Type:      config.Type,
-		Hashes:    config.Hashes,
-		Encrypted: config.Encrypted,
-		Keys:      config.Keys,
 		Version:   Version,
 		Timestamp: time.Now().Unix(),
+		Hashes:    hashes,
+		Config:    config,
 	}, nil
 }
 
-func Read(data []byte, typ string) (*Metadata, error) {
+func Read(data []byte, typ string, encrypted bool) (*Metadata, error) {
 	if !bytes.Equal(stringx.Sanitize(data), data) {
 		return nil, errors.Errorf("metadata contains invalid characters")
 	}
@@ -58,6 +59,10 @@ func Read(data []byte, typ string) (*Metadata, error) {
 		return nil, errors.Errorf("incompatible type (%s vs %s)", md.Type, typ)
 	}
 
+	if md.Encrypted != encrypted {
+		return nil, errors.Errorf("incompatible encryption config (%v vs %v)", md.Encrypted, encrypted)
+	}
+
 	if md.Version != Version {
 		return nil, errors.Errorf("incompatible version (%d vs %d)", md.Version, Version)
 	}
@@ -65,25 +70,38 @@ func Read(data []byte, typ string) (*Metadata, error) {
 	return md, err
 }
 
-func (m *Metadata) Marshal() ([]byte, error) {
+func Size(config Config) (int, error) {
+	m, err := New(config)
+	if err != nil {
+		return -1, err
+	}
+
 	data, err := json.Marshal(m)
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
 
-	if !bytes.Equal(stringx.Sanitize(data), data) {
-		return nil, errors.Errorf("metadata contains invalid characters")
+	size := len(data)
+	if size <= 0 {
+		return -1, iofs.ErrInvalidSize
 	}
 
-	return data, nil
+	return size, nil
 }
 
-func (m *Metadata) MarshalIndent() ([]byte, error) {
-	data, err := json.MarshalIndent(m, "", "    ")
+func (m *Metadata) MarshalJSON() ([]byte, error) {
+	err := m.Hashes.Finalize()
 	if err != nil {
 		return nil, err
 	}
-	data = append(data, '\n')
+
+	type alias Metadata
+	tmp := alias(*m)
+
+	data, err := json.Marshal(tmp)
+	if err != nil {
+		return nil, err
+	}
 
 	if !bytes.Equal(stringx.Sanitize(data), data) {
 		return nil, errors.Errorf("metadata contains invalid characters")
@@ -92,10 +110,14 @@ func (m *Metadata) MarshalIndent() ([]byte, error) {
 	return data, nil
 }
 
-func (m *Metadata) Compare(other *Metadata) int64 {
-	if m.Type != other.Type || m.Hashes != other.Hashes {
-		log.Debug("skipping metadata comparison")
-		return 1
+func Compare(a *Metadata, b *Metadata) int {
+	if b != nil &&
+		a.Type == b.Type &&
+		a.Version == b.Version &&
+		a.Timestamp == b.Timestamp &&
+		a.Encrypted == b.Encrypted &&
+		*a.Hashes == *b.Hashes {
+		return 0
 	}
-	return m.Timestamp - other.Timestamp
+	return 1
 }
