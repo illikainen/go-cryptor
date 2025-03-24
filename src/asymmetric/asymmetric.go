@@ -482,7 +482,6 @@ func (k *PrivateKeyContainer) UnmarshalJSON(data []byte) error {
 	}
 	err = json.Unmarshal(tmp.NaCl.Encrypt, k.NaCl.encrypt)
 	if err != nil {
-		log.Warnf("XX %s", err)
 		return err
 	}
 
