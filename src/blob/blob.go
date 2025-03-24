@@ -2,40 +2,37 @@ package blob
 
 import (
 	"bytes"
-	"encoding/binary"
-	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
-	"unsafe"
 
-	"github.com/illikainen/go-cryptor/src/asymmetric"
-	"github.com/illikainen/go-cryptor/src/asymmetric/naclsig"
-	"github.com/illikainen/go-cryptor/src/asymmetric/rsa"
 	"github.com/illikainen/go-cryptor/src/cryptor"
 	"github.com/illikainen/go-cryptor/src/hasher"
 	"github.com/illikainen/go-cryptor/src/metadata"
-	"github.com/illikainen/go-cryptor/src/symmetric"
 
 	"github.com/illikainen/go-netutils/src/transport"
 	"github.com/illikainen/go-utils/src/errorx"
 	"github.com/illikainen/go-utils/src/iofs"
-	"github.com/illikainen/go-utils/src/logging"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
-type Config struct {
-	Type      string
-	Path      string
-	Transport transport.Transport
-	Keys      *Keyring
+type BlobReader interface {
+	io.ReadSeeker
+	Stat() (os.FileInfo, error)
+	Sync() error
+	Name() string
 }
 
-type Blob struct {
-	Config
-	name          string
-	symmetricKeys map[string]*symmetric.Keys
+type BlobWriter interface {
+	io.WriteSeeker
+}
+
+type BlobReadWriter interface {
+	BlobReader
+	BlobWriter
+	Truncate(int64) error
 }
 
 type Keyring struct {
@@ -43,280 +40,53 @@ type Keyring struct {
 	Private cryptor.PrivateKey
 }
 
-var ErrInvalidKeyUsage = errors.New("key usage overlap")
-var ErrInvalidHeaderSize = errors.New("invalid header size")
-var ErrNotVerified = errors.New("the bundle has not been verified")
-
-func New(config Config) (*Blob, error) {
-	_, file := filepath.Split(config.Path)
-	b := &Blob{
-		Config:        config,
-		name:          file,
-		symmetricKeys: map[string]*symmetric.Keys{},
-	}
-
-	return b, nil
+type Options struct {
+	Type      string
+	Keyring   *Keyring
+	Encrypted bool
 }
 
-func (b *Blob) HasLocal() (bool, error) {
-	return iofs.Exists(b.Path)
-}
+const ChunkSize = 1024 * 32
 
-func (b *Blob) HasRemote(remote string) (bool, error) {
-	return b.Transport.Exists(remote)
-}
+var ErrSigned = errors.New("the bundle has already been signed")
 
-func (b *Blob) Download(remote string) (err error) {
-	remotef, err := b.Transport.Open(remote)
+func Download(uri *url.URL, rw BlobReadWriter, opts *Options) (r *Reader, err error) {
+	log.Infof("downloading '%s' from '%s'", rw.Name(), uri)
+
+	stat, err := rw.Stat()
 	if err != nil {
-		return err
-	}
-	defer errorx.Defer(remotef.Close, &err)
-
-	metaDataSize := uint32(0)
-	err = binary.Read(remotef, binary.BigEndian, &metaDataSize)
-	if err != nil {
-		return err
-	}
-	if metaDataSize == 0 {
-		return errors.Errorf("invalid metadata size")
+		return nil, err
 	}
 
-	metaData := make([]byte, metaDataSize)
-	err = iofs.ReadFull(remotef, metaData)
-	if err != nil {
-		return err
-	}
-
-	signature := make([]byte, asymmetric.SignatureSize)
-	err = iofs.ReadFull(remotef, signature)
-	if err != nil {
-		return err
-	}
-
-	meta := &metadata.Metadata{}
-	err = logging.WithSuppress(func() error {
-		meta, err = b.VerifyMetadata(metaData, signature)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-
-	tmpDir, tmpClean, err := iofs.MkdirTemp()
-	if err != nil {
-		return err
-	}
-	defer errorx.Defer(tmpClean, &err)
-
-	cachedMeta := &metadata.Metadata{}
-	cachedBlob := ""
-	exists, err := b.HasLocal()
-	if err != nil {
-		return err
-	}
-	if exists {
-		cachedBlob = filepath.Join(tmpDir, fmt.Sprintf("%s.cache", b.name))
-		err = logging.WithSuppress(func() error {
-			cachedMeta, err = b.Verify(cachedBlob)
-			return err
-		})
+	var cacheMeta *metadata.Metadata
+	if stat.Size() > 0 {
+		cacheHdr, err := readAndVerifyHeader(rw, opts)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		cacheMeta = cacheHdr.meta
 	}
 
-	tmpBlob := filepath.Join(tmpDir, b.name)
-	log.Tracef("download: temporary file: %s", tmpBlob)
-
-	localf, err := os.Create(tmpBlob) // #nosec G304
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if localf != nil {
-			err = errorx.Join(err, localf.Close())
-		}
-	}()
-
-	err = binary.Write(localf, binary.BigEndian, uint32(len(metaData)))
-	if err != nil {
-		return err
-	}
-
-	_, err = localf.Write(metaData)
-	if err != nil {
-		return err
-	}
-
-	_, err = localf.Write(signature)
-	if err != nil {
-		return err
-	}
-
-	if meta.Compare(cachedMeta) == 0 {
-		log.Debugf("using cached bundle: %s", cachedBlob)
-
-		err = iofs.Copy(localf, cachedBlob)
-		if err != nil {
-			return err
-		}
-	} else {
-		log.Debug("downloading...")
-
-		_, err := io.Copy(localf, remotef)
-		if err != nil {
-			return err
-		}
-	}
-
-	err = localf.Close()
-	if err != nil {
-		return err
-	}
-	localf = nil
-
-	tmpBundle, err := New(Config{
-		Type: b.Type,
-		Path: tmpBlob,
-		Keys: b.Keys,
-	})
-	if err != nil {
-		return err
-	}
-
-	err = logging.WithSuppress(func() error {
-		_, err = tmpBundle.Verify("")
-		return err
-	})
-	if err != nil {
-		return err
-	}
-
-	log.Tracef("download: move %s to %s", tmpBlob, b.Path)
-	err = iofs.MoveFile(tmpBlob, b.Path)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (b *Blob) Upload(remote string) error {
-	return b.Transport.Upload(remote, b.Path)
-}
-
-func (b *Blob) Sign() (err error) {
-	log.Debugf("signing %s", b.Path)
-
-	tmpDir, tmpClean, err := iofs.MkdirTemp()
-	if err != nil {
-		return err
-	}
-	defer errorx.Defer(tmpClean, &err)
-
-	tmpBlob := filepath.Join(tmpDir, b.name)
-	err = b.Export(tmpBlob)
-	if err != nil {
-		return err
-	}
-
-	hashes, err := hasher.New(tmpBlob)
-	if err != nil {
-		return err
-	}
-
-	meta, err := metadata.New(metadata.Config{
-		Type:      b.Type,
-		Hashes:    hashes,
-		Encrypted: len(b.symmetricKeys) > 0,
-		Keys:      b.symmetricKeys,
-	})
-	if err != nil {
-		return err
-	}
-
-	metaData, err := meta.Marshal()
-	if err != nil {
-		return err
-	}
-
-	signature, err := b.Keys.Private.Sign(metaData)
-	if err != nil {
-		return err
-	}
-
-	log.Tracef("metadata: %s: signed json\n%s", b.Keys.Private, metaData)
-	log.Infof("metadata: %s: signed json (%d bytes)", b.Keys.Private, len(metaData))
-
-	header := bytes.Buffer{}
-	err = binary.Write(&header, binary.BigEndian, uint32(len(metaData)))
-	if err != nil {
-		return err
-	}
-
-	err = iofs.Copy(&header, bytes.NewReader(metaData))
-	if err != nil {
-		return err
-	}
-
-	err = iofs.Copy(&header, bytes.NewReader(signature))
-	if err != nil {
-		return err
-	}
-
-	err = b.Import(tmpBlob, header.Bytes())
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (b *Blob) VerifyMetadata(metaData []byte, signature []byte) (*metadata.Metadata, error) {
-	for _, pubKey := range b.Keys.Public {
-		err := pubKey.Verify(metaData, signature)
-		if err == nil {
-			return metadata.Read(metaData, b.Type)
-		}
-	}
-
-	return nil, errors.Wrapf(cryptor.ErrInvalidSignature, "could not verify signature")
-}
-
-func (b *Blob) Verify(out string) (meta *metadata.Metadata, err error) {
-	log.Debugf("verifying %s", b.Path)
-
-	f, err := os.Open(b.Path)
+	xfer, err := transport.New(uri)
 	if err != nil {
 		return nil, err
 	}
-	defer errorx.Defer(f.Close, &err)
+	defer errorx.Defer(xfer.Close, &err)
 
-	metaDataSize := uint32(0)
-	err = binary.Read(f, binary.BigEndian, &metaDataSize)
+	reader, err := xfer.Open(uri.Path)
 	if err != nil {
 		return nil, err
 	}
-	if metaDataSize == 0 {
-		return nil, errors.Errorf("invalid metadata size")
-	}
+	defer errorx.Defer(reader.Close, &err)
 
-	metaData := make([]byte, metaDataSize)
-	err = iofs.ReadFull(f, metaData)
+	hdr, err := readAndVerifyHeader(reader, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	signature := make([]byte, asymmetric.SignatureSize)
-	err = iofs.ReadFull(f, signature)
-	if err != nil {
-		return nil, err
-	}
-
-	meta, err = b.VerifyMetadata(metaData, signature)
-	if err != nil {
-		return nil, err
+	if metadata.Compare(hdr.meta, cacheMeta) <= 0 {
+		log.Infof("using cached '%s'", rw.Name())
+		return NewReader(rw, opts)
 	}
 
 	tmpDir, tmpClean, err := iofs.MkdirTemp()
@@ -325,242 +95,107 @@ func (b *Blob) Verify(out string) (meta *metadata.Metadata, err error) {
 	}
 	defer errorx.Defer(tmpClean, &err)
 
-	tmpBlob := filepath.Join(tmpDir, b.name)
-	err = b.Export(tmpBlob)
+	tmpFile, err := os.Create(filepath.Join(tmpDir, "blob")) // #nosec G304
+	if err != nil {
+		return nil, err
+	}
+	defer errorx.Defer(tmpFile.Close, &err)
+
+	err = iofs.Copy(tmpFile, bytes.NewReader(hdr.headerBytes))
 	if err != nil {
 		return nil, err
 	}
 
-	err = meta.Hashes.Verify(tmpBlob)
+	hashes, err := hasher.NewWriter()
 	if err != nil {
 		return nil, err
 	}
 
-	if out != "" {
-		err := iofs.MoveFile(tmpBlob, out)
+	for {
+		buf := [4096]byte{}
+		n, err := reader.Read(buf[:])
+		if n == 0 && err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if n <= 0 {
+			return nil, errors.Errorf("bug")
+		}
+
+		_, err = hashes.Write(buf[:n])
+		if err != nil {
+			return nil, err
+		}
+
+		err = iofs.Copy(tmpFile, bytes.NewReader(buf[:n]))
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return meta, nil
+	err = hashes.Finalize()
+	if err != nil {
+		return nil, err
+	}
+
+	err = hashes.Verify(hdr.meta.Hashes)
+	if err != nil {
+		return nil, err
+	}
+
+	err = tmpFile.Sync()
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = iofs.Seek(tmpFile, 0, io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = iofs.Seek(rw, 0, io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rw.Truncate(0)
+	if err != nil {
+		return nil, err
+	}
+
+	err = iofs.Copy(rw, tmpFile)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rw.Sync()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewReader(rw, opts)
 }
 
-func (b *Blob) Encrypt() (err error) {
-	tmpDir, tmpClean, err := iofs.MkdirTemp()
-	if err != nil {
-		return err
-	}
-	defer errorx.Defer(tmpClean, &err)
+func Upload(uri *url.URL, r BlobReader, opts *Options) (err error) {
+	log.Infof("uploading '%s' to '%s'", r.Name(), uri)
 
-	tmpBlob := filepath.Join(tmpDir, b.name)
-	err = b.Export(tmpBlob)
+	_, err = NewReader(r, opts)
 	if err != nil {
 		return err
 	}
 
-	aesKey, err := symmetric.GenerateKey(cryptor.AESGCMSymmetric)
+	xfer, err := transport.New(uri)
 	if err != nil {
 		return err
 	}
+	defer errorx.Defer(xfer.Close, &err)
 
-	tmpBlobAes := tmpBlob + ".aesgcm"
-	err = aesKey.Encrypt(tmpBlob, tmpBlobAes)
-	if err != nil {
-		return err
-	}
-
-	aesKeyData, err := aesKey.Marshal()
-	if err != nil {
-		return err
-	}
-
-	for _, pubKey := range b.Keys.Public {
-		ciphertext, err := pubKey.Encrypt(aesKeyData)
-		if err != nil {
-			return err
-		}
-
-		b.symmetricKeys[pubKey.Fingerprint()] = &symmetric.Keys{}
-		b.symmetricKeys[pubKey.Fingerprint()].AESGCM = ciphertext
-	}
-
-	xcpKey, err := symmetric.GenerateKey(cryptor.XCHACHA20POLY1305Symmetric)
-	if err != nil {
-		return err
-	}
-
-	tmpBlobXCP := tmpBlobAes + ".xchacha20poly1305"
-	err = xcpKey.Encrypt(tmpBlobAes, tmpBlobXCP)
-	if err != nil {
-		return err
-	}
-
-	xcpKeyData, err := xcpKey.Marshal()
-	if err != nil {
-		return err
-	}
-
-	for _, pubKey := range b.Keys.Public {
-		ciphertext, err := pubKey.Encrypt(xcpKeyData)
-		if err != nil {
-			return err
-		}
-
-		b.symmetricKeys[pubKey.Fingerprint()].XChaCha20Poly1305 = ciphertext
-	}
-
-	return b.Import(tmpBlobXCP, nil)
-}
-
-func (b *Blob) Decrypt(in string, out string, keys map[string]*symmetric.Keys) (err error) {
-	log.Tracef("%s: decrypt to %s", in, out)
-
-	tmpBlob := in
-	tmpDir, tmpClean, err := iofs.MkdirTemp()
-	if err != nil {
-		return err
-	}
-	defer errorx.Defer(tmpClean, &err)
-
-	symKeys, ok := keys[b.Keys.Private.Fingerprint()]
-	if !ok {
-		return errors.Errorf("missing symmetric keys for %s", b.Keys.Private.Fingerprint())
-	}
-
-	xcpKeyData, err := b.Keys.Private.Decrypt(symKeys.XChaCha20Poly1305)
-	if err != nil {
-		return err
-	}
-
-	xcpKey, err := symmetric.ReadKey(cryptor.XCHACHA20POLY1305Symmetric, xcpKeyData)
-	if err != nil {
-		return err
-	}
-
-	partial := filepath.Join(tmpDir, "xchacha20poly1305.dec")
-	err = xcpKey.Decrypt(tmpBlob, partial)
-	if err != nil {
-		return err
-	}
-
-	aesKeyData, err := b.Keys.Private.Decrypt(symKeys.AESGCM)
-	if err != nil {
-		return err
-	}
-
-	aesKey, err := symmetric.ReadKey(cryptor.AESGCMSymmetric, aesKeyData)
-	if err != nil {
-		return err
-	}
-
-	plaintext := filepath.Join(tmpDir, "aesgcm.dec")
-	err = aesKey.Decrypt(partial, plaintext)
-	if err != nil {
-		return err
-	}
-
-	return iofs.MoveFile(plaintext, out)
-}
-
-func (b *Blob) Export(out string) (err error) {
-	log.Tracef("%s: blob: exporting %s", b.Path, out)
-
-	inf, err := os.Open(b.Path)
-	if err != nil {
-		return err
-	}
-	defer errorx.Defer(inf.Close, &err)
-
-	metaDataSize := uint32(0)
-	err = binary.Read(inf, binary.BigEndian, &metaDataSize)
-	if err != nil {
-		return err
-	}
-
-	metaData := make([]byte, metaDataSize)
-	err = iofs.ReadFull(inf, metaData)
-	if err != nil {
-		return err
-	}
-
-	naclSig := make([]byte, naclsig.SignatureSize)
-	err = iofs.ReadFull(inf, naclSig)
-	if err != nil {
-		return err
-	}
-
-	rsaSig := make([]byte, rsa.SignatureSize)
-	err = iofs.ReadFull(inf, rsaSig)
-	if err != nil {
-		return err
-	}
-
-	outf, err := os.Create(out) // #nosec G304
-	if err != nil {
-		return err
-	}
-	defer errorx.Defer(outf.Close, &err)
-
-	_, err = io.Copy(outf, inf)
+	err = xfer.Upload(uri.Path, r.Name())
 	if err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func (b *Blob) Import(in string, header []byte) (err error) {
-	log.Tracef("%s: blob: importing %s", b.Path, in)
-
-	inf, err := os.Open(in) // #nosec G304
-	if err != nil {
-		return err
-	}
-	defer errorx.Defer(inf.Close, &err)
-
-	outf, err := os.Create(b.Path)
-	if err != nil {
-		return err
-	}
-	defer errorx.Defer(outf.Close, &err)
-
-	if header == nil {
-		metaSize := unsafe.Sizeof(uint32(0)) // #nosec G103
-		buf := bytes.NewBuffer(make([]byte, metaSize+asymmetric.SignatureSize))
-		header = buf.Bytes()
-	}
-
-	_, err = outf.Write(header)
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(outf, inf)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (b *Blob) Move(path string) (*Blob, error) {
-	log.Infof("%s: moving to %s", b.Path, path)
-
-	newb, err := New(Config{
-		Type:      b.Type,
-		Path:      path,
-		Transport: b.Transport,
-		Keys:      b.Keys,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	err = iofs.MoveFile(b.Path, newb.Path)
-	if err != nil {
-		return nil, err
-	}
-
-	return newb, nil
 }
