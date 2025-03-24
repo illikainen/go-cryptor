@@ -19,7 +19,13 @@ from Cryptodome.PublicKey import RSA
 from Cryptodome.Signature import pss
 
 XCHACHA20_POLY1305_NONCE_SIZE = 24
+XCHACHA20_POLY1305_TAG_SIZE = 16
+XCHACHA20_POLY1305_OVERHEAD = XCHACHA20_POLY1305_NONCE_SIZE + XCHACHA20_POLY1305_TAG_SIZE
+
 AES_GCM_NONCE_SIZE = 12
+AES_GCM_TAG_SIZE = 16
+AES_GCM_TAG_OVERHEAD = AES_GCM_NONCE_SIZE + AES_GCM_TAG_SIZE
+
 ED25519_SIGNATURE_SIZE = 64
 RSA_SIGNATURE_SIZE = int(4096 / 8)
 
@@ -112,53 +118,44 @@ def decrypt(src, privkey):
             raise RuntimeError("bad digest")
 
         #
-        # 4. Decrypt the inner layer of the blob with XChaCha20Poly1305.
-        #    The ephemeral key for XChaCha20Poly1305 is stored encrypted
-        #    with RSA and NaCl in the metadata file that was verified in
-        #    #1.
+        # 4. Decrypt the blob in chunks.  Each chunk is encrypted with
+        #    XChaCha20Poly1305 (outer layer) and AES256-GCM (inner layer).
+        #    The ephemeral keys for XChaCha20Poly1305 and AES256-GCM are
+        #    stored encrypted with NaCl (outer layer) and RSA (inner
+        #    layer) in the metadata file that was verified in #1.
         #
-        partial_plaintext = []
+        plaintext = []
         rsa_oaep = PKCS1_OAEP.new(rsa_enc_key, SHA256)
 
         xcp_key_data = metadata["Keys"][fingerprint]["XChaCha20Poly1305"]
         xcp_key_partial = rsa_oaep.decrypt(base64.b64decode(xcp_key_data))
-        xcp_key = json.loads(nacl_enc_key.decrypt(base64.b64decode(xcp_key_partial)))
-
-        tmp = blob
-        while data := tmp[:xcp_key["ChunkSize"]]:
-            nonce = data[:XCHACHA20_POLY1305_NONCE_SIZE]
-            ciphertext = data[XCHACHA20_POLY1305_NONCE_SIZE:]
-
-            xcp = ChaCha20_Poly1305.new(key=base64.b64decode(xcp_key["Key"]), nonce=nonce)
-            partial_plaintext.append(xcp.decrypt(ciphertext))
-            tmp = tmp[xcp_key["ChunkSize"]:]
-
-        #
-        # 5. Decrypt the outer layer of the blob with AES-GCM.  The
-        #    ephemeral key for AES-GCM is stored encrypted with RSA and
-        #    NaCl in the metadata file that was verified in #1.
-        #
-        plaintext = []
+        xcp_key = nacl_enc_key.decrypt(base64.b64decode(xcp_key_partial))
 
         aes_key_data = metadata["Keys"][fingerprint]["AESGCM"]
         aes_key_partial = rsa_oaep.decrypt(base64.b64decode(aes_key_data))
-        aes_key = json.loads(nacl_enc_key.decrypt(base64.b64decode(aes_key_partial)))
+        aes_key = nacl_enc_key.decrypt(base64.b64decode(aes_key_partial))
 
-        tmp = b"".join(partial_plaintext)
-        while data := tmp[:aes_key["ChunkSize"]]:
-            nonce = data[:AES_GCM_NONCE_SIZE]
-            ciphertext = data[AES_GCM_NONCE_SIZE:]
+        tmp = blob
+        chunk_size = metadata["ChunkSize"] + XCHACHA20_POLY1305_OVERHEAD
+        while data := tmp[:chunk_size]:
+            xcp_nonce = data[:XCHACHA20_POLY1305_NONCE_SIZE]
+            xcp_ciphertext = data[XCHACHA20_POLY1305_NONCE_SIZE:]
+            xcp = ChaCha20_Poly1305.new(key=xcp_key, nonce=xcp_nonce)
+            partial = xcp.decrypt(xcp_ciphertext)
 
+            aes_nonce = partial[:AES_GCM_NONCE_SIZE]
+            aes_ciphertext = partial[AES_GCM_NONCE_SIZE:]
             aes = AES.new(
-                key=base64.b64decode(aes_key["Key"]),
+                key=aes_key,
                 mode=AES.MODE_GCM,
-                nonce=nonce,
+                nonce=aes_nonce,
             )
-            plaintext.append(aes.decrypt(ciphertext))
-            tmp = tmp[aes_key["ChunkSize"]:]
+            plaintext.append(aes.decrypt(aes_ciphertext))
+
+            tmp = tmp[chunk_size:]
 
         #
-        # 6. Return the plaintext archive.
+        # 5. Return the plaintext archive.
         #
         return tarfile.TarFile(fileobj=io.BytesIO(b"".join(plaintext)))
 
