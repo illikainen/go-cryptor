@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/illikainen/go-cryptor/src/asymmetric"
 	"github.com/illikainen/go-cryptor/src/cryptor"
 	"github.com/illikainen/go-cryptor/src/hasher"
 	"github.com/illikainen/go-cryptor/src/metadata"
@@ -49,6 +50,36 @@ type Options struct {
 const ChunkSize = 1024 * 32
 
 var ErrSigned = errors.New("the bundle has already been signed")
+
+func ReadKeyring(privkey string, pubkeys []string) (*Keyring, error) {
+	pub := []cryptor.PublicKey{}
+
+	for _, elt := range pubkeys {
+		path, err := iofs.Expand(elt)
+		if err != nil {
+			return nil, err
+		}
+
+		pubkey, err := asymmetric.ReadPublicKey(path)
+		if err != nil {
+			return nil, err
+		}
+
+		pub = append(pub, pubkey)
+	}
+
+	path, err := iofs.Expand(privkey)
+	if err != nil {
+		return nil, err
+	}
+
+	priv, err := asymmetric.ReadPrivateKey(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Keyring{Public: pub, Private: priv}, nil
+}
 
 func Download(uri *url.URL, rw BlobReadWriter, opts *Options) (r *Reader, err error) {
 	log.Infof("downloading '%s' from '%s'", rw.Name(), uri)
