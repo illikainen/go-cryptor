@@ -35,6 +35,14 @@ type Reader struct {
 }
 
 func NewReader(r BlobReader, opts *Options) (*Reader, error) {
+	if len(opts.Keyring.Public) <= 0 {
+		return nil, errors.Errorf("at least one public key must be configured to verify signatures")
+	}
+
+	if opts.Encrypted && opts.Keyring.Private == nil {
+		return nil, errors.Errorf("a private key must be configured to decrypt")
+	}
+
 	stat, err := r.Stat()
 	if err != nil {
 		return nil, err

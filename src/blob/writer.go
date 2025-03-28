@@ -42,11 +42,19 @@ func NewWriter(w BlobWriter, opts *Options) (*Writer, error) {
 		return nil, err
 	}
 
+	if opts.Keyring.Private == nil {
+		return nil, errors.Errorf("a private key must be configured to sign")
+	}
+
 	var xcp *xchacha20poly1305.Encrypter
 	var aes *aesgcm.Encrypter
 	symmetricKeys := map[string]*symmetric.Keys{}
 
 	if opts.Encrypted {
+		if len(opts.Keyring.Public) <= 0 {
+			return nil, errors.Errorf("at least one public key must be configured to encrypt")
+		}
+
 		xcp, err = xchacha20poly1305.GenerateKey()
 		if err != nil {
 			return nil, err

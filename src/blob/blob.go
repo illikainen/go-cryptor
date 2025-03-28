@@ -52,8 +52,7 @@ const ChunkSize = 1024 * 32
 var ErrSigned = errors.New("the bundle has already been signed")
 
 func ReadKeyring(privkey string, pubkeys []string) (*Keyring, error) {
-	pub := []cryptor.PublicKey{}
-
+	var pub []cryptor.PublicKey
 	for _, elt := range pubkeys {
 		path, err := iofs.Expand(elt)
 		if err != nil {
@@ -68,14 +67,17 @@ func ReadKeyring(privkey string, pubkeys []string) (*Keyring, error) {
 		pub = append(pub, pubkey)
 	}
 
-	path, err := iofs.Expand(privkey)
-	if err != nil {
-		return nil, err
-	}
+	var priv cryptor.PrivateKey
+	if privkey != "" {
+		path, err := iofs.Expand(privkey)
+		if err != nil {
+			return nil, err
+		}
 
-	priv, err := asymmetric.ReadPrivateKey(path)
-	if err != nil {
-		return nil, err
+		priv, err = asymmetric.ReadPrivateKey(path)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &Keyring{Public: pub, Private: priv}, nil
