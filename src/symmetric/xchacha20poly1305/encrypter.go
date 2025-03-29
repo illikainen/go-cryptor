@@ -50,7 +50,7 @@ func GenerateKey() (*Encrypter, error) {
 }
 
 func (e *Encrypter) Encrypt(data []byte) ([]byte, error) {
-	log.Infof("xchacha20poly1305: encrypting %d byte(s)", len(data))
+	log.Tracef("xchacha20poly1305: encrypting %d byte(s)", len(data))
 
 	if len(data) <= 0 {
 		return nil, iofs.ErrInvalidSize
