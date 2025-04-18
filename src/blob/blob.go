@@ -84,7 +84,7 @@ func ReadKeyring(privkey string, pubkeys []string) (*Keyring, error) {
 }
 
 func Download(uri *url.URL, rw BlobReadWriter, opts *Options) (r *Reader, err error) {
-	log.Infof("downloading '%s' from '%s'", rw.Name(), uri)
+	log.Tracef("downloading '%s' from '%s'", rw.Name(), uri)
 
 	stat, err := rw.Stat()
 	if err != nil {

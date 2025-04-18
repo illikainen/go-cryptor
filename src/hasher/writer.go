@@ -81,17 +81,17 @@ func (w *Writer) Verify(other *Writer) error {
 	if len(w.SHA256) != 44 || w.SHA256 != other.SHA256 {
 		return errors.Wrap(ErrInvalidHash, "sha2-256")
 	}
-	log.Infof("sha2-256: verified: %s", other.SHA256)
+	log.Tracef("sha2-256: verified: %s", other.SHA256)
 
 	if len(w.KECCAK512) != 88 || w.KECCAK512 != other.KECCAK512 {
 		return errors.Wrap(ErrInvalidHash, "sha3-512")
 	}
-	log.Infof("sha3-512: verified: %s", other.KECCAK512)
+	log.Tracef("sha3-512: verified: %s", other.KECCAK512)
 
 	if len(w.BLAKE2b512) != 88 || w.BLAKE2b512 != other.BLAKE2b512 {
 		return errors.Wrap(ErrInvalidHash, "blake2b-512")
 	}
-	log.Infof("blake2b-512: verified: %s", other.BLAKE2b512)
+	log.Tracef("blake2b-512: verified: %s", other.BLAKE2b512)
 
 	return nil
 }

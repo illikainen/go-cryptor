@@ -19,7 +19,7 @@ type Encrypter struct {
 }
 
 func GenerateKey() (*Encrypter, error) {
-	log.Info("xchacha20poly1305: generating key")
+	log.Trace("xchacha20poly1305: generating key")
 
 	key := make([]byte, chacha20poly1305.KeySize)
 	err := iofs.ReadFull(rand.Reader, key)

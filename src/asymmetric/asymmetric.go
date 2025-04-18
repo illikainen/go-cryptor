@@ -271,15 +271,15 @@ func (k *PublicKeyContainer) Verify(message []byte, signature []byte) error {
 	if err != nil {
 		return err
 	}
-	log.Debug("metadata verified with NaCl")
+	log.Tracef("metadata verified with NaCl")
 
 	err = k.RSA.sign.Verify(message, signature[naclsig.SignatureSize:])
 	if err != nil {
 		return err
 	}
-	log.Debug("metadata verified with RSA")
+	log.Tracef("metadata verified with RSA")
 
-	log.Infof("metadata verified with %s", k.String())
+	log.Tracef("metadata verified with %s", k.String())
 	return nil
 }
 

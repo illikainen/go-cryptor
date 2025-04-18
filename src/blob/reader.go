@@ -77,7 +77,7 @@ func (r *Reader) verify() (*header, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	log.Debugf("verifying %s", r.reader.Name())
+	log.Tracef("verifying %s", r.reader.Name())
 
 	hdr, err := readAndVerifyHeader(r.reader, r.Options)
 	if err != nil {
