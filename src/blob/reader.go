@@ -69,10 +69,6 @@ func NewReader(r BlobReader, opts *Options) (*Reader, error) {
 	return reader, nil
 }
 
-func (r *Reader) Metadata() *metadata.Metadata {
-	return r.meta
-}
-
 func (r *Reader) verify() (*header, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -99,7 +95,7 @@ func (r *Reader) verify() (*header, error) {
 		return nil, err
 	}
 
-	err = hashes.Verify(hdr.meta.Hashes)
+	err = hashes.Verify(hdr.Metadata.Hashes)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +121,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 
 	for len(r.chunk) < size {
 		if r.Encrypted {
-			ciphertext := make([]byte, int(r.meta.ChunkSize)+r.xcp.Overhead+r.aes.Overhead)
+			ciphertext := make([]byte, int(r.Metadata.ChunkSize)+r.xcp.Overhead+r.aes.Overhead)
 			n, err := r.reader.Read(ciphertext)
 			if n == 0 && err == io.EOF {
 				eof = io.EOF
@@ -150,13 +146,13 @@ func (r *Reader) Read(p []byte) (int, error) {
 				return -1, err
 			}
 
-			if len(postAes) > int(r.meta.ChunkSize) {
+			if len(postAes) > int(r.Metadata.ChunkSize) {
 				return -1, iofs.ErrInvalidSize
 			}
 
 			r.chunk = append(r.chunk, postAes...)
 		} else {
-			data := make([]byte, r.meta.ChunkSize)
+			data := make([]byte, r.Metadata.ChunkSize)
 			n, err := r.reader.Read(data)
 			if n == 0 && err == io.EOF {
 				eof = io.EOF
@@ -213,9 +209,10 @@ func (r *Reader) Seek(offset int64, whence int) (int64, error) {
 }
 
 type header struct {
-	meta *metadata.Metadata
-	xcp  *xchacha20poly1305.Decrypter
-	aes  *aesgcm.Decrypter
+	Signer   cryptor.PublicKey
+	Metadata *metadata.Metadata
+	xcp      *xchacha20poly1305.Decrypter
+	aes      *aesgcm.Decrypter
 
 	headerBytes []byte
 	headerSize  int64
@@ -288,7 +285,8 @@ func readAndVerifyHeader(reader io.Reader, opts *Options) (*header, error) {
 			}
 
 			return &header{
-				meta:        meta,
+				Signer:      pubKey,
+				Metadata:    meta,
 				xcp:         xcp,
 				aes:         aes,
 				headerBytes: append(metadataSizeBytes, append(metadataBytes, signature...)...),

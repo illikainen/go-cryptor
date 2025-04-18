@@ -97,7 +97,7 @@ func Download(uri *url.URL, rw BlobReadWriter, opts *Options) (r *Reader, err er
 		if err != nil {
 			return nil, err
 		}
-		cacheMeta = cacheHdr.meta
+		cacheMeta = cacheHdr.Metadata
 	}
 
 	xfer, err := transport.New(uri)
@@ -117,7 +117,7 @@ func Download(uri *url.URL, rw BlobReadWriter, opts *Options) (r *Reader, err er
 		return nil, err
 	}
 
-	if metadata.Compare(hdr.meta, cacheMeta) <= 0 {
+	if metadata.Compare(hdr.Metadata, cacheMeta) <= 0 {
 		log.Infof("using cached '%s'", rw.Name())
 		return NewReader(rw, opts)
 	}
@@ -173,7 +173,7 @@ func Download(uri *url.URL, rw BlobReadWriter, opts *Options) (r *Reader, err er
 		return nil, err
 	}
 
-	err = hashes.Verify(hdr.meta.Hashes)
+	err = hashes.Verify(hdr.Metadata.Hashes)
 	if err != nil {
 		return nil, err
 	}
