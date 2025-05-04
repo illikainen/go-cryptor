@@ -75,7 +75,7 @@ func (w *Writer) Verify(other *Writer) error {
 	}
 
 	if w.hashedBytes <= 0 || other.HashedBytes > math.MaxInt || w.hashedBytes != int(other.HashedBytes) {
-		return iofs.ErrInvalidSize
+		return errors.Wrapf(iofs.ErrInvalidSize, "hashed bytes: %d != %d", w.hashedBytes, other.HashedBytes)
 	}
 
 	if len(w.SHA256) != 44 || w.SHA256 != other.SHA256 {
