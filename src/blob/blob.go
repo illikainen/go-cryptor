@@ -144,27 +144,34 @@ func Download(uri *url.URL, rw BlobReadWriter, opts *Options) (r *Reader, err er
 		return nil, err
 	}
 
-	for {
+	done := false
+	for !done {
+		// The documentation for github.com/pkg/sftp states that:
+		//
+		// > Read follows io.Reader semantics, so when Read encounters
+		// > an error or EOF condition after successfully reading N > 0
+		// > bytes, it returns the number of bytes read.
+		//
+		// So we must process the data before checking for EOF.
 		buf := [4096]byte{}
 		n, err := reader.Read(buf[:])
-		if n == 0 && err == io.EOF {
-			break
-		}
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return nil, err
 		}
-		if n <= 0 {
+		done = err == io.EOF
+
+		if n < 0 {
 			return nil, errors.Errorf("bug")
-		}
+		} else if n > 0 {
+			_, err = hashes.Write(buf[:n])
+			if err != nil {
+				return nil, err
+			}
 
-		_, err = hashes.Write(buf[:n])
-		if err != nil {
-			return nil, err
-		}
-
-		err = iofs.Copy(tmpFile, bytes.NewReader(buf[:n]))
-		if err != nil {
-			return nil, err
+			err = iofs.Copy(tmpFile, bytes.NewReader(buf[:n]))
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
