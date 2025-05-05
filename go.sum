@@ -3,6 +3,10 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/fatih/color v1.15.0 h1:kOqh6YHBtK8aywxGerMG2Eq3H6Qgoqeo13Bk2Mv/nBs=
 github.com/fatih/color v1.15.0/go.mod h1:0h5ZqXfHYED7Bhv2ZJamyIOUej9KtShiJESRwBDUSsw=
+github.com/illikainen/go-netutils v0.0.0-20250505122326-0e2700986716 h1:6b+oJ2F+IFO3tuhLrTbjT0Vicp/u+q7fcqRyo3ssoEI=
+github.com/illikainen/go-netutils v0.0.0-20250505122326-0e2700986716/go.mod h1:NC/Hlw20lMczESnDDW7JNyDuA3GPSimTrVFE76r0E8c=
+github.com/illikainen/go-utils v0.0.0-20250505121911-a2d2eb85064b h1:ChJnMjNmQAcD6Aoii/idoDeMxj6NtaQSNccoTd5Njo0=
+github.com/illikainen/go-utils v0.0.0-20250505121911-a2d2eb85064b/go.mod h1:VmDx9pk02aLjhoJ2/fknXBvH+UwNIxA77W/fcdnb5AU=
 github.com/kevinburke/ssh_config v1.2.0 h1:x584FjTGwHzMwvHx18PXxbBVzfnxogHaAReU4gf13a4=
 github.com/kevinburke/ssh_config v1.2.0/go.mod h1:CT57kijsi8u/K/BOFA39wgDQJ9CxiF4nAY/ojJ6r6mM=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=

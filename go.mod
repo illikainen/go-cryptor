@@ -3,8 +3,8 @@ module github.com/illikainen/go-cryptor
 go 1.19
 
 require (
-	github.com/illikainen/go-netutils v0.0.0
-	github.com/illikainen/go-utils v0.0.0
+	github.com/illikainen/go-netutils v0.0.0-20250505122326-0e2700986716
+	github.com/illikainen/go-utils v0.0.0-20250505121911-a2d2eb85064b
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.0
 	golang.org/x/crypto v0.17.0
@@ -23,7 +23,3 @@ require (
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/term v0.15.0 // indirect
 )
-
-replace github.com/illikainen/go-netutils => ../go-netutils
-
-replace github.com/illikainen/go-utils => ../go-utils
