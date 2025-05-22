@@ -2,43 +2,26 @@
 # bubblewrap container without network access and with limited access to the
 # filesystem.
 
-GOPATH ?= $(shell pwd)/.go/path
-GOCACHE ?= $(shell pwd)/.go/cache
-
 OUTPUT ?= $(shell pwd)/build/
 OUTPUT_RELEASE ?= $(OUTPUT)release/
-OUTPUT_TOOLS ?= $(OUTPUT)tools/
+GOFER ?= gofer
+SANDBOX ?= $(GOFER) run --
 
 MODULE := $(shell grep '^module' go.mod|cut -d' ' -f2)
-NAME := $(shell basename $(MODULE))
-VERSION := $(shell jq .Version src/metadata/metadata.json 2>/dev/null || echo "0.0.0")
 
-SRC := ./src ./tools
-GOFER := go run $(shell pwd)/tools/gofer.go
-SANDBOX := $(GOFER) sandbox
+SRC := ./src
 
-# The versions of these tools must match the versions in tools/go.mod.
-TOOL_NILERR := $(GOPATH)/pkg/mod/github.com/gostaticanalysis/nilerr@v0.1.1/cmd/nilerr
-TOOL_ERRCHECK := $(GOPATH)/pkg/mod/github.com/kisielk/errcheck@v1.6.3
-TOOL_REVIVE := $(GOPATH)/pkg/mod/github.com/mgechev/revive@v1.3.2
-TOOL_GOSEC := ./tools/gosec.go
-TOOL_GOIMPORTS := $(GOPATH)/pkg/mod/golang.org/x/tools@v0.13.0/cmd/goimports
-TOOL_STATICCHECK := $(GOPATH)/pkg/mod/honnef.co/go/tools@v0.4.2/cmd/staticcheck
-
-export GOPATH := $(GOPATH)
-export GOCACHE := $(GOCACHE)
 export CGO_ENABLED := 0
 export GO111MODULE := on
 export GOFLAGS := -mod=readonly
 export GOSUMDB := sum.golang.org
-export GOPROXY := off
 export REAL_GOPROXY := $(shell go env GOPROXY)
+export GOPROXY := off
 
 # Unfortunately there is no Go-specific way of pinning the CA for GOPROXY.
+# The go.pem file is created by the `pin` target in this Makefile.
 export SSL_CERT_FILE := ./go.pem
 export SSL_CERT_DIR := /path/does/not/exist/to/pin/ca
-
-export PATH := $(OUTPUT_TOOLS):$(PATH)
 
 define PIN_EXPLANATION
 # The checksums for go.sum and go.mod are pinned because `go mod` with
@@ -50,43 +33,21 @@ define PIN_EXPLANATION
 endef
 export PIN_EXPLANATION
 
-all: build
-
-download:
-	@GOPROXY=$(REAL_GOPROXY) go mod download -x
-	@make verify
-
-download-tools:
-	@cd tools && GOPROXY=$(REAL_GOPROXY) go mod download -x
-	@make verify
+all:
 
 tidy:
 	@GOPROXY=$(REAL_GOPROXY) go mod tidy
 	@$(SANDBOX) go mod verify
 
-tidy-tools:
-	@cd tools && GOPROXY=$(REAL_GOPROXY) go mod tidy
-	@cd tools && $(SANDBOX) go mod verify
-
-prepare-offline: tidy tidy-tools
+prepare-offline: tidy
 	@GOPROXY=$(REAL_GOPROXY) go list -m -json all >/dev/null
-	@cd tools && GOPROXY=$(REAL_GOPROXY) go list -m -json all >/dev/null
-
-tools:
-	@mkdir -p $(OUTPUT_TOOLS)
-	@$(SANDBOX) go build -modfile tools/go.mod -o $(OUTPUT_TOOLS) $(TOOL_NILERR)
-	@$(SANDBOX) go build -modfile tools/go.mod -o $(OUTPUT_TOOLS) $(TOOL_ERRCHECK)
-	@$(SANDBOX) go build -modfile tools/go.mod -o $(OUTPUT_TOOLS) $(TOOL_REVIVE)
-	@$(SANDBOX) go build -modfile tools/go.mod -o $(OUTPUT_TOOLS) $(TOOL_GOSEC)
-	@$(SANDBOX) go build -modfile tools/go.mod -o $(OUTPUT_TOOLS) $(TOOL_GOIMPORTS)
-	@$(SANDBOX) go build -modfile tools/go.mod -o $(OUTPUT_TOOLS) $(TOOL_STATICCHECK)
-	@$(SANDBOX) echo "output stored in $(OUTPUT_TOOLS)"
 
 clean:
-	@$(SANDBOX) rm -rfv $(GOCACHE) $(OUTPUT_TOOLS) $(OUTPUT)
+	@$(SANDBOX) go clean
+	@$(SANDBOX) go clean -cache
+	@$(SANDBOX) rm -rfv $(OUTPUT)
 
 distclean:
-	@if [ -d "$(GOPATH)" ]; then chmod -R u=rwX "$(GOPATH)" && rm -rfv "$(GOPATH)"; fi
 	@$(SANDBOX) git clean -d -f -x
 
 test:
@@ -99,12 +60,10 @@ coverage:
 check-nilerr:
 	@$(SANDBOX) echo "Running nilerr"
 	@$(SANDBOX) nilerr ./...
-	@cd tools && $(SANDBOX) nilerr ./...
 
 check-errcheck:
 	@$(SANDBOX) echo "Running errcheck"
 	@$(SANDBOX) errcheck ./...
-	@cd tools && $(SANDBOX) errcheck ./...
 
 check-revive:
 	@$(SANDBOX) echo "Running revive"
@@ -112,12 +71,11 @@ check-revive:
 
 check-gosec:
 	@$(SANDBOX) echo "Running gosec"
-	@$(SANDBOX) gosec -quiet -exclude-dir $(GOPATH) ./...
+	@$(SANDBOX) gosec -quiet ./...
 
 check-staticcheck:
 	@$(SANDBOX) echo "Running staticcheck"
 	@$(SANDBOX) staticcheck ./...
-	@cd tools && $(SANDBOX) staticcheck ./...
 
 check-vet:
 	@$(SANDBOX) echo "Running go vet"
@@ -142,19 +100,18 @@ fix-imports:
 fix: verify fix-fmt fix-imports
 
 pin:
-	@$(SANDBOX) echo "$$PIN_EXPLANATION" > go.pin
-	@$(SANDBOX) sha256sum go.sum go.mod tools/go.sum tools/go.mod >> go.pin
+	@$(SANDBOX) echo "$$PIN_EXPLANATION" > go.pin 2>&1
+	@$(SANDBOX) sha256sum go.sum go.mod >> go.pin 2>&1
 	@test -f /etc/ssl/certs/GTS_Root_R1.pem && test -f /etc/ssl/certs/GTS_Root_R4.pem && \
 		cat /etc/ssl/certs/GTS_Root_R1.pem /etc/ssl/certs/GTS_Root_R4.pem > go.pem || true
 
 verify:
 	@$(SANDBOX) sha256sum --strict --check go.pin
-	@if [ -d $(GOPATH) ]; then $(SANDBOX) go mod verify; fi
-	@if [ -d $(GOPATH) ]; then cd tools && $(SANDBOX) go mod verify; fi
+	@$(SANDBOX) go mod verify
 
 qa: check test coverage
 
-.PHONY: all download download-tools tidy tidy-tools tools clean distclean
+.PHONY: all tidy clean distclean
 .PHONY: test coverage prepare-offline
 .PHONY: check-nilerr check-errcheck check-revive check-gosec check-staticcheck check-vet check-fmt check-imports check
 .PHONY: fix-imports fix-fmt fix pin verify qa
