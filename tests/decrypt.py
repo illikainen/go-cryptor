@@ -157,28 +157,40 @@ def decrypt(src, privkey):
         #
         # 5. Return the plaintext archive.
         #
-        return tarfile.TarFile(fileobj=io.BytesIO(b"".join(plaintext)))
+        return io.BytesIO(b"".join(plaintext))
 
 
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("-k", "--privkey", type=Path, required=True)
     ap.add_argument("-i", "--in", type=Path, required=True, dest="src")
+    ap.add_argument("--tar", action="store_true")
     return ap.parse_args()
 
 
 def main():
     args = parse_args()
+    plaintext = decrypt(args.src, args.privkey)
+
     content = []
-    with decrypt(args.src, args.privkey) as t:
-        for member in t.getmembers():
-            if not member.isdir():
-                data = t.extractfile(member).read()
-                content.append({
-                    "path": member.path,
-                    "data": data.decode(),
-                    "sha256": hashlib.sha256(data).hexdigest(),
-                })
+    if args.tar:
+        with tarfile.TarFile(fileobj=plaintext) as t:
+            for member in t.getmembers():
+                if not member.isdir():
+                    data = t.extractfile(member).read()
+                    content.append({
+                        "path": member.path,
+                        "data": data.decode(),
+                        "sha256": hashlib.sha256(data).hexdigest(),
+                    })
+    else:
+        data = plaintext.read()
+        content.append({
+            "path": "",
+            "data": data.decode(),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        })
+
     print(json.dumps(content, indent=2))
 
 
