@@ -24,7 +24,7 @@ XCHACHA20_POLY1305_OVERHEAD = XCHACHA20_POLY1305_NONCE_SIZE + XCHACHA20_POLY1305
 
 AES_GCM_NONCE_SIZE = 12
 AES_GCM_TAG_SIZE = 16
-AES_GCM_TAG_OVERHEAD = AES_GCM_NONCE_SIZE + AES_GCM_TAG_SIZE
+AES_GCM_OVERHEAD = AES_GCM_NONCE_SIZE + AES_GCM_TAG_SIZE
 
 ED25519_SIGNATURE_SIZE = 64
 RSA_SIGNATURE_SIZE = int(4096 / 8)
@@ -136,21 +136,23 @@ def decrypt(src, privkey):
         aes_key = nacl_enc_key.decrypt(base64.b64decode(aes_key_partial))
 
         tmp = blob
-        chunk_size = metadata["ChunkSize"] + XCHACHA20_POLY1305_OVERHEAD
+        chunk_size = metadata["ChunkSize"] + XCHACHA20_POLY1305_OVERHEAD + AES_GCM_OVERHEAD
         while data := tmp[:chunk_size]:
             xcp_nonce = data[:XCHACHA20_POLY1305_NONCE_SIZE]
-            xcp_ciphertext = data[XCHACHA20_POLY1305_NONCE_SIZE:]
+            xcp_tag = data[-XCHACHA20_POLY1305_TAG_SIZE:]
+            xcp_ciphertext = data[XCHACHA20_POLY1305_NONCE_SIZE:-XCHACHA20_POLY1305_TAG_SIZE]
             xcp = ChaCha20_Poly1305.new(key=xcp_key, nonce=xcp_nonce)
-            partial = xcp.decrypt(xcp_ciphertext)
+            partial = xcp.decrypt_and_verify(xcp_ciphertext, xcp_tag)
 
             aes_nonce = partial[:AES_GCM_NONCE_SIZE]
-            aes_ciphertext = partial[AES_GCM_NONCE_SIZE:]
+            aes_tag = partial[-AES_GCM_TAG_SIZE:]
+            aes_ciphertext = partial[AES_GCM_NONCE_SIZE:-AES_GCM_TAG_SIZE]
             aes = AES.new(
                 key=aes_key,
                 mode=AES.MODE_GCM,
                 nonce=aes_nonce,
             )
-            plaintext.append(aes.decrypt(aes_ciphertext))
+            plaintext.append(aes.decrypt_and_verify(aes_ciphertext, aes_tag))
 
             tmp = tmp[chunk_size:]
 
