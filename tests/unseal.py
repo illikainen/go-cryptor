@@ -76,7 +76,7 @@ def load_keys(path):
     return nacl_sign_key, nacl_enc_key, rsa_sign_key, rsa_enc_key, fingerprint
 
 
-def decrypt(src, privkey):
+def decrypt(src, privkey, encrypted):
     nacl_sign_key, nacl_enc_key, rsa_sign_key, rsa_enc_key, fingerprint = load_keys(privkey)
 
     with open(src, "rb") as f:
@@ -97,13 +97,13 @@ def decrypt(src, privkey):
         metadata = json.loads(metadata_bytes)
 
         #
-        # 2. Read encrypted blob.
+        # 2. Read blob.
         #
         blob = f.read()
 
         #
-        # 3. Verify the encrypted blob with digests from the metadata
-        #    that was verified in #1.
+        # 3. Verify the blob with digests from the metadata that was
+        #    verified in #1.
         #
         sha256 = base64.b64encode(hashlib.sha256(blob).digest()).decode()
         if sha256 != metadata["Hashes"]["SHA256"]:
@@ -117,47 +117,53 @@ def decrypt(src, privkey):
         if blake2b != metadata["Hashes"]["BLAKE2b512"]:
             raise RuntimeError("bad digest")
 
-        #
-        # 4. Decrypt the blob in chunks.  Each chunk is encrypted with
-        #    XChaCha20Poly1305 (outer layer) and AES256-GCM (inner layer).
-        #    The ephemeral keys for XChaCha20Poly1305 and AES256-GCM are
-        #    stored encrypted with NaCl (outer layer) and RSA (inner
-        #    layer) in the metadata file that was verified in #1.
-        #
         plaintext = []
-        rsa_oaep = PKCS1_OAEP.new(rsa_enc_key, SHA256)
+        if encrypted:
+            #
+            # 4. Decrypt the blob in chunks.  Each chunk is encrypted with
+            #    XChaCha20Poly1305 (outer layer) and AES256-GCM (inner layer).
+            #    The ephemeral keys for XChaCha20Poly1305 and AES256-GCM are
+            #    stored encrypted with NaCl (outer layer) and RSA (inner
+            #    layer) in the metadata file that was verified in #1.
+            #
+            rsa_oaep = PKCS1_OAEP.new(rsa_enc_key, SHA256)
 
-        xcp_key_data = metadata["Keys"][fingerprint]["XChaCha20Poly1305"]
-        xcp_key_partial = rsa_oaep.decrypt(base64.b64decode(xcp_key_data))
-        xcp_key = nacl_enc_key.decrypt(base64.b64decode(xcp_key_partial))
+            xcp_key_data = metadata["Keys"][fingerprint]["XChaCha20Poly1305"]
+            xcp_key_partial = rsa_oaep.decrypt(base64.b64decode(xcp_key_data))
+            xcp_key = nacl_enc_key.decrypt(base64.b64decode(xcp_key_partial))
 
-        aes_key_data = metadata["Keys"][fingerprint]["AESGCM"]
-        aes_key_partial = rsa_oaep.decrypt(base64.b64decode(aes_key_data))
-        aes_key = nacl_enc_key.decrypt(base64.b64decode(aes_key_partial))
+            aes_key_data = metadata["Keys"][fingerprint]["AESGCM"]
+            aes_key_partial = rsa_oaep.decrypt(base64.b64decode(aes_key_data))
+            aes_key = nacl_enc_key.decrypt(base64.b64decode(aes_key_partial))
 
-        tmp = blob
-        chunk_size = metadata["ChunkSize"] + XCHACHA20_POLY1305_OVERHEAD + AES_GCM_OVERHEAD
-        while data := tmp[:chunk_size]:
-            xcp_nonce = data[:XCHACHA20_POLY1305_NONCE_SIZE]
-            xcp_tag = data[-XCHACHA20_POLY1305_TAG_SIZE:]
-            xcp_ciphertext = data[XCHACHA20_POLY1305_NONCE_SIZE:-XCHACHA20_POLY1305_TAG_SIZE]
-            xcp = ChaCha20_Poly1305.new(key=xcp_key, nonce=xcp_nonce)
-            partial = xcp.decrypt_and_verify(xcp_ciphertext, xcp_tag)
+            tmp = blob
+            chunk_size = metadata["ChunkSize"] + XCHACHA20_POLY1305_OVERHEAD + AES_GCM_OVERHEAD
+            while data := tmp[:chunk_size]:
+                xcp_nonce = data[:XCHACHA20_POLY1305_NONCE_SIZE]
+                xcp_tag = data[-XCHACHA20_POLY1305_TAG_SIZE:]
+                xcp_ciphertext = data[XCHACHA20_POLY1305_NONCE_SIZE:-XCHACHA20_POLY1305_TAG_SIZE]
+                xcp = ChaCha20_Poly1305.new(key=xcp_key, nonce=xcp_nonce)
+                partial = xcp.decrypt_and_verify(xcp_ciphertext, xcp_tag)
 
-            aes_nonce = partial[:AES_GCM_NONCE_SIZE]
-            aes_tag = partial[-AES_GCM_TAG_SIZE:]
-            aes_ciphertext = partial[AES_GCM_NONCE_SIZE:-AES_GCM_TAG_SIZE]
-            aes = AES.new(
-                key=aes_key,
-                mode=AES.MODE_GCM,
-                nonce=aes_nonce,
-            )
-            plaintext.append(aes.decrypt_and_verify(aes_ciphertext, aes_tag))
+                aes_nonce = partial[:AES_GCM_NONCE_SIZE]
+                aes_tag = partial[-AES_GCM_TAG_SIZE:]
+                aes_ciphertext = partial[AES_GCM_NONCE_SIZE:-AES_GCM_TAG_SIZE]
+                aes = AES.new(
+                    key=aes_key,
+                    mode=AES.MODE_GCM,
+                    nonce=aes_nonce,
+                )
+                plaintext.append(aes.decrypt_and_verify(aes_ciphertext, aes_tag))
 
-            tmp = tmp[chunk_size:]
+                tmp = tmp[chunk_size:]
+        else:
+            #
+            # 4. If the blob is signed but not encrypted, use it as-is.
+            #
+            plaintext.append(blob)
 
         #
-        # 5. Return the plaintext archive.
+        # 5. Return the plaintext.
         #
         return io.BytesIO(b"".join(plaintext))
 
@@ -166,13 +172,14 @@ def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("-k", "--privkey", type=Path, required=True)
     ap.add_argument("-i", "--in", type=Path, required=True, dest="src")
+    ap.add_argument("--signed-only", action="store_true")
     ap.add_argument("--tar", action="store_true")
     return ap.parse_args()
 
 
 def main():
     args = parse_args()
-    plaintext = decrypt(args.src, args.privkey)
+    plaintext = decrypt(args.src, args.privkey, not args.signed_only)
 
     content = []
     if args.tar:
@@ -182,14 +189,14 @@ def main():
                     data = t.extractfile(member).read()
                     content.append({
                         "path": member.path,
-                        "data": data.decode(),
+                        "data": base64.b64encode(data).decode(),
                         "sha256": hashlib.sha256(data).hexdigest(),
                     })
     else:
         data = plaintext.read()
         content.append({
             "path": "",
-            "data": data.decode(),
+            "data": base64.b64encode(data).decode(),
             "sha256": hashlib.sha256(data).hexdigest(),
         })
 
