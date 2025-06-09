@@ -1,0 +1,51 @@
+name: Pipeline
+
+on: [push, pull_request]
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:12
+    steps:
+      - name: Prepare signing key
+        run: |
+          echo 'dev-personal-git@iodine ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOaK5/rx1e5OSInMYOwoLeGyIwi7Hpao0qUC4oyO0/Wr' >"${HOME}/.signers"
+
+      - name: Prepare packages
+        run: |
+          apt-get update
+          apt-get -y dist-upgrade
+          apt-get -y install ca-certificates git golang make python3 python3-nacl python3-pycryptodome
+
+      - name: Checkout gofer
+        uses: actions/checkout@v4
+        with:
+          path: gofer
+          repository: illikainen/gofer
+          fetch-depth: 0
+
+      - name: Build gofer
+        run: |
+          chown -R root:root .
+          git -c gpg.ssh.allowedSignersFile="${HOME}/.signers" verify-commit HEAD
+          make tidy
+          make verify
+          make
+          cp build/gofer-linux-amd64 /usr/local/bin/gofer
+        working-directory: gofer
+
+      - name: Checkout ourself
+        uses: actions/checkout@v4
+        with:
+          path: this
+          fetch-depth: 0
+
+      - name: Test ourself
+        run: |
+          chown -R root:root .
+          git -c gpg.ssh.allowedSignersFile="${HOME}/.signers" verify-commit HEAD
+          make tidy
+          make check
+          make test
+        working-directory: this
